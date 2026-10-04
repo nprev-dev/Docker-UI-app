@@ -1,0 +1,352 @@
+/* Baseline look only. Colours live here as roles so the theme can be swapped in one place. */
+:root {
+  color-scheme: dark;
+
+  --page: #050807;
+  --surface: #0b110e;
+  --border: rgba(120, 255, 190, 0.16);
+  --hairline: rgba(120, 255, 190, 0.07);
+
+  --ink: #dcebe2;
+  --ink-secondary: #a3b9ad;
+  --ink-muted: #7b9186;
+
+  --accent: #35d48a;
+  --accent-track: rgba(53, 212, 138, 0.16);
+
+  /* Status colours mean state only, never decoration. */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --warning-track: rgba(250, 178, 25, 0.18);
+  --critical: #e0504f;
+  --critical-track: rgba(224, 80, 79, 0.2);
+  --neutral: #6c7f76;
+
+  --mono: "Ubuntu Sans Mono", "Ubuntu Mono", "JetBrains Mono", "DejaVu Sans Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  /* Everything is sized in rem, so the whole page scales with the screen width. */
+  font-size: clamp(12px, 0.5vw + 8px, 22px);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--mono);
+  line-height: 1.4;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.host {
+  color: var(--accent);
+  font-weight: 700;
+  text-shadow: 0 0 0.75rem rgba(53, 212, 138, 0.45);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-secondary);
+}
+
+.link-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--neutral);
+}
+
+.link[data-state="live"] .link-dot {
+  background: var(--good);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.link[data-state="stale"] .link-dot,
+.link[data-state="connecting"] .link-dot {
+  background: var(--warning);
+}
+
+.link[data-state="lost"] .link-dot {
+  background: var(--critical);
+  border-radius: 0;
+}
+
+.clock {
+  margin-left: auto;
+  color: var(--ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.grid {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+}
+
+.panel {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.panel-meta {
+  margin: 0;
+  color: var(--ink-secondary);
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.notice {
+  margin: 0;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  border-left: 0.25rem solid var(--critical);
+  color: var(--ink);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  margin: 0;
+  padding: 2rem 1rem;
+  color: var(--ink-muted);
+  text-align: center;
+}
+
+.ctable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  transition: opacity 300ms;
+}
+
+/* While Docker is unreachable the last known rows stay visible, dimmed. */
+.panel.offline .ctable {
+  opacity: 0.35;
+}
+
+/* Shares of the panel width, so every column shrinks together on a narrower screen. */
+.col-state { width: 10%; }
+.col-name { width: 18%; }
+.col-ports { width: 12%; }
+.col-cpu { width: 12%; }
+.col-mem { width: 18%; }
+.col-net { width: 8%; }
+.col-status { width: 14%; }
+
+.ctable th {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ctable td {
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.ctable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ctable .num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.row {
+  transition: opacity 350ms;
+}
+
+.row.entering {
+  animation: row-in 450ms ease-out;
+}
+
+.row.leaving {
+  opacity: 0;
+}
+
+.row.changed td {
+  animation: flash 900ms ease-out;
+}
+
+/* A container that is not running has no live numbers; let it recede. */
+.row:not([data-state="running"]) .name,
+.row:not([data-state="running"]) .status {
+  color: var(--ink-secondary);
+}
+
+/* Docker's status text can be long ("Restarting (1) Less than a second ago"): wrap it, but to two lines at most. */
+.status {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.state-icon {
+  width: 1em;
+  color: var(--neutral);
+  text-align: center;
+}
+
+.row[data-tone="good"] .state-icon { color: var(--good); }
+.row[data-tone="warning"] .state-icon { color: var(--warning); }
+.row[data-tone="critical"] .state-icon { color: var(--critical); }
+
+.name {
+  display: block;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.image {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+}
+
+.ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.port {
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.port.unpublished {
+  border-style: dashed;
+  color: var(--ink-muted);
+}
+
+.none {
+  color: var(--ink-muted);
+}
+
+.usage {
+  display: grid;
+  grid-template-columns: minmax(2rem, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.usage-value {
+  min-width: 4.5rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.usage-of {
+  color: var(--ink-muted);
+}
+
+.meter {
+  height: 0.4rem;
+  border-radius: 4px;
+  background: var(--accent-track);
+  overflow: hidden;
+  transition: background-color 300ms;
+}
+
+.meter-fill {
+  width: 0;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  transition: width 600ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 300ms;
+}
+
+.meter[data-level="warning"] { background: var(--warning-track); }
+.meter[data-level="warning"] .meter-fill { background: var(--warning); }
+.meter[data-level="critical"] { background: var(--critical-track); }
+.meter[data-level="critical"] .meter-fill { background: var(--critical); }
+
+@keyframes pulse {
+  50% { opacity: 0.35; }
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-0.75rem);
+  }
+}
+
+@keyframes flash {
+  from { background: rgba(53, 212, 138, 0.2); }
+  to { background: transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

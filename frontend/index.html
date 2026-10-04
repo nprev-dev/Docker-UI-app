@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rack Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <span class="host" id="host">&mdash;</span>
+    <span class="link" id="link" data-state="connecting">
+      <span class="link-dot" aria-hidden="true"></span>
+      <span id="link-label">Connecting</span>
+    </span>
+    <time class="clock" id="clock"></time>
+  </header>
+
+  <main class="grid">
+    <section class="panel" id="containers" aria-labelledby="containers-title">
+      <header class="panel-head">
+        <h2 id="containers-title">Containers</h2>
+        <p class="panel-meta" id="containers-count"></p>
+      </header>
+      <p class="notice" id="containers-notice" role="status" hidden></p>
+      <table class="ctable">
+        <colgroup>
+          <col class="col-state">
+          <col class="col-name">
+          <col class="col-ports">
+          <col class="col-cpu">
+          <col class="col-mem">
+          <col class="col-net">
+          <col class="col-net">
+          <col class="col-status">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">State</th>
+            <th scope="col">Name</th>
+            <th scope="col">Ports</th>
+            <th scope="col">CPU</th>
+            <th scope="col">Memory</th>
+            <th scope="col" class="num">Net in</th>
+            <th scope="col" class="num">Net out</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody id="containers-body"></tbody>
+      </table>
+      <p class="empty" id="containers-empty" hidden>No containers on this host.</p>
+    </section>
+  </main>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
