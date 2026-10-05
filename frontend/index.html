@@ -7,50 +7,50 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <header class="topbar">
-    <span class="host" id="host">&mdash;</span>
-    <span class="link" id="link" data-state="connecting">
-      <span class="link-dot" aria-hidden="true"></span>
-      <span id="link-label">Connecting</span>
-    </span>
-    <time class="clock" id="clock"></time>
-  </header>
-
-  <main class="grid">
-    <section class="panel" id="containers" aria-labelledby="containers-title">
-      <header class="panel-head">
-        <h2 id="containers-title">Containers</h2>
-        <p class="panel-meta" id="containers-count"></p>
-      </header>
-      <p class="notice" id="containers-notice" role="status" hidden></p>
+  <main class="screen">
+    <section class="frame" id="containers" aria-labelledby="containers-title">
+      <h2 class="frame-title" id="containers-title">containers</h2>
+      <p class="frame-tag" id="containers-count"></p>
+      <p class="alert" id="containers-notice" role="status" hidden></p>
       <table class="ctable">
         <colgroup>
           <col class="col-state">
           <col class="col-name">
+          <col class="col-id">
+          <col class="col-image">
           <col class="col-ports">
           <col class="col-cpu">
           <col class="col-mem">
           <col class="col-net">
           <col class="col-net">
+          <col class="col-pids">
           <col class="col-status">
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">State</th>
-            <th scope="col">Name</th>
-            <th scope="col">Ports</th>
+            <th scope="col">STATE</th>
+            <th scope="col">NAME</th>
+            <th scope="col">ID</th>
+            <th scope="col">IMAGE</th>
+            <th scope="col">PORTS</th>
             <th scope="col">CPU</th>
-            <th scope="col">Memory</th>
-            <th scope="col" class="num">Net in</th>
-            <th scope="col" class="num">Net out</th>
-            <th scope="col">Status</th>
+            <th scope="col">MEM USED/LIMIT</th>
+            <th scope="col" class="num">NET RX</th>
+            <th scope="col" class="num">NET TX</th>
+            <th scope="col" class="num">PIDS</th>
+            <th scope="col">STATUS</th>
           </tr>
         </thead>
         <tbody id="containers-body"></tbody>
       </table>
-      <p class="empty" id="containers-empty" hidden>No containers on this host.</p>
+      <p class="empty" id="containers-empty" hidden>-- no containers --</p>
     </section>
   </main>
+
+  <footer class="statusbar" id="link" data-state="connecting">
+    <span><span id="spinner">-</span> [<span id="host">?</span>] <span id="link-label">connecting</span></span>
+    <time id="clock"></time>
+  </footer>
 
   <script type="module" src="app.js"></script>
 </body>

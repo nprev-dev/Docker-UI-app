@@ -1,59 +1,51 @@
-// Live containers panel: listens to the server's snapshot stream and animates what changed.
+// Live containers panel, drawn like a terminal tool: character cells, text meters, reverse-video blinks.
 
 // No message for this long means the numbers on screen can no longer be trusted.
 const STALE_AFTER_MS = 5000;
 // A stream that stays silent this long is assumed dead and reopened.
 const RECONNECT_AFTER_MS = 20000;
 const RETRY_MS = 2000;
-// How fast a number glides to its new value; smaller is snappier.
-const GLIDE_MS = 180;
-const ROW_EXIT_MS = 350;
-const MAX_PORTS = 4;
+// How fast a number rolls to its new value; smaller is snappier.
+const GLIDE_MS = 120;
+const BLINK_MS = 140;
+const ROW_EXIT_MS = 500;
+// Characters the ports column can show; must match its width in style.css minus the gap.
+const PORTS_WIDTH = 14;
+const METER_CELLS = 12;
 
 const WARNING_AT = 70;
 const CRITICAL_AT = 90;
 
-const STATES = {
-  running: { icon: "▶", tone: "good" },
-  paused: { icon: "‖", tone: "warning" },
-  restarting: { icon: "↻", tone: "warning" },
-  created: { icon: "○", tone: "neutral" },
-  removing: { icon: "○", tone: "warning" },
-  exited: { icon: "■", tone: "neutral" },
-  dead: { icon: "✕", tone: "critical" },
-};
-const UNKNOWN_STATE = { icon: "?", tone: "neutral" };
+// Which status colour each Docker state wears; anything else stays uncoloured.
+const TONES = { running: "ok", paused: "warn", restarting: "warn", removing: "warn", dead: "crit" };
 
-const BYTE_UNITS = ["B", "KiB", "MiB", "GiB", "TiB"];
+const SPINNER = "|/-\\";
 
-// The unit switches slightly early, where the smaller one would round up to "1024 KiB" or "1000 Kbps".
-function formatBytes(bytes) {
-  let value = bytes;
+// Three significant digits at most, the way htop and docker print sizes.
+function scaled(value, step, units, separator) {
   let unit = 0;
-  while (value >= 1023.5 && unit < BYTE_UNITS.length - 1) {
-    value /= 1024;
+  // The unit switches slightly early, where the smaller one would round up to "1024K" or "1000 Kbps".
+  while (value >= step - 0.5 && unit < units.length - 1) {
+    value /= step;
     unit += 1;
   }
-  const digits = unit === 0 || value >= 100 ? 0 : value >= 10 ? 1 : 2;
-  return `${value.toFixed(digits)} ${BYTE_UNITS[unit]}`;
+  const digits = unit === 0 || value >= 99.95 ? 0 : value >= 9.995 ? 1 : 2;
+  return `${value.toFixed(digits)}${separator}${units[unit]}`;
 }
 
-function formatRate(bitsPerSecond) {
-  if (bitsPerSecond >= 999.995e6) return `${(bitsPerSecond / 1e9).toFixed(2)} Gbps`;
-  if (bitsPerSecond >= 999.5e3) return `${(bitsPerSecond / 1e6).toFixed(2)} Mbps`;
-  if (bitsPerSecond >= 999.5) return `${(bitsPerSecond / 1e3).toFixed(0)} Kbps`;
-  return `${bitsPerSecond.toFixed(0)} bps`;
-}
-
-function formatPercent(percent) {
-  return `${percent.toFixed(1)}%`;
-}
+const formatBytes = (bytes) => scaled(bytes, 1024, ["B", "K", "M", "G", "T"], "");
+const formatRate = (bitsPerSecond) => scaled(bitsPerSecond, 1000, ["bps", "Kbps", "Mbps", "Gbps"], " ");
 
 function formatPort(port) {
   const suffix = port.proto === "tcp" ? "" : `/${port.proto}`;
-  if (port.host == null) return `${port.container}${suffix}`;
-  if (port.host === port.container) return `${port.host}${suffix}`;
-  return `${port.host}→${port.container}${suffix}`;
+  if (port.host == null || port.host === port.container) return `${port.container}${suffix}`;
+  return `${port.host}->${port.container}${suffix}`;
+}
+
+// The registry host says where the image came from, not what it is; leave it to the tooltip.
+function shortImage(image) {
+  const parts = image.split("/");
+  return parts.length > 1 && /[.:]/.test(parts[0]) ? parts.slice(1).join("/") : image;
 }
 
 function element(tag, className, text) {
@@ -67,8 +59,9 @@ function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
-// --- Gliding numbers -------------------------------------------------------
+// --- Rolling numbers -------------------------------------------------------
 
+const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const gliding = new Set();
 let lastFrame = null;
 let frameQueued = false;
@@ -84,9 +77,9 @@ function frame(now) {
   // Real elapsed time, so a slow or paused screen catches up instead of lagging behind.
   const elapsed = lastFrame == null ? 16 : now - lastFrame;
   lastFrame = now;
-  const pull = 1 - Math.exp(-elapsed / GLIDE_MS);
-  for (const number of gliding) {
-    if (number.step(pull)) gliding.delete(number);
+  const pull = calm ? 1 : 1 - Math.exp(-elapsed / GLIDE_MS);
+  for (const glide of gliding) {
+    if (glide.step(pull)) gliding.delete(glide);
   }
   if (gliding.size) {
     queueFrame();
@@ -95,12 +88,13 @@ function frame(now) {
   }
 }
 
-class GlidingNumber {
-  constructor(node, format) {
-    this.node = node;
-    this.format = format;
+// A value that rolls towards its target and redraws on the way; draw(null) means "no reading".
+class Glide {
+  constructor(draw) {
+    this.draw = draw;
     this.current = null;
     this.target = null;
+    draw(null);
   }
 
   set(value) {
@@ -108,14 +102,14 @@ class GlidingNumber {
       this.current = null;
       this.target = null;
       gliding.delete(this);
-      setText(this.node, "—");
+      this.draw(null);
       return;
     }
     this.target = value;
     if (this.current == null) {
-      // Nothing to glide from, so show the first value at once.
+      // Nothing to roll from, so show the first value at once.
       this.current = value;
-      setText(this.node, this.format(value));
+      this.draw(value);
       return;
     }
     gliding.add(this);
@@ -124,82 +118,76 @@ class GlidingNumber {
 
   step(pull) {
     const gap = this.target - this.current;
-    const arrived = Math.abs(gap) <= Math.abs(this.target) * 0.002 + 1e-6;
+    const arrived = pull >= 1 || Math.abs(gap) <= Math.abs(this.target) * 0.002 + 1e-6;
     this.current = arrived ? this.target : this.current + gap * pull;
-    setText(this.node, this.format(this.current));
+    this.draw(this.current);
     return arrived;
   }
 }
 
+// --- Meters ----------------------------------------------------------------
+
+function buildMeter() {
+  const meter = element("span", "meter");
+  const fill = element("span", "meter-fill");
+  const rest = element("span");
+  meter.append("[", fill, rest, "]");
+  return { meter, fill, rest };
+}
+
+function drawMeter({ meter, fill, rest }, percent) {
+  // Rounded up like htop, so any real load shows at least one bar; "0.0%" shows none.
+  const cells = percent == null || percent < 0.05 ? 0 : Math.min(METER_CELLS, Math.ceil((percent / 100) * METER_CELLS));
+  setText(fill, "|".repeat(cells));
+  setText(rest, " ".repeat(METER_CELLS - cells));
+  meter.dataset.level = percent >= CRITICAL_AT ? "crit" : percent >= WARNING_AT ? "warn" : "ok";
+}
+
 // --- Rows ------------------------------------------------------------------
 
-function buildUsageCell(format) {
-  const cell = element("td");
-  const wrap = element("div", "usage");
-  const meter = element("div", "meter");
-  const fill = element("div", "meter-fill");
-  const value = element("span", "usage-value");
-  const figure = element("span");
-  const of = element("span", "usage-of");
-  meter.append(fill);
-  value.append(figure, of);
-  wrap.append(meter, value);
-  cell.append(wrap);
-  return { cell, meter, fill, of, number: new GlidingNumber(figure, format) };
-}
-
-function setMeter(usage, percent) {
-  const share = percent == null ? 0 : Math.max(0, Math.min(100, percent));
-  usage.fill.style.width = `${share}%`;
-  usage.meter.dataset.level = share >= CRITICAL_AT ? "critical" : share >= WARNING_AT ? "warning" : "normal";
-}
-
 function buildRow() {
-  const tr = element("tr", "row entering");
-  tr.addEventListener("animationend", () => tr.classList.remove("entering", "changed"));
+  const tr = element("tr", "row");
+  const cell = (className) => tr.appendChild(element("td", className));
 
-  const stateCell = element("td");
-  const state = element("span", "state");
-  const stateIcon = element("span", "state-icon");
-  stateIcon.setAttribute("aria-hidden", "true");
-  const stateLabel = element("span");
-  state.append(stateIcon, stateLabel);
-  stateCell.append(state);
-
-  const nameCell = element("td");
-  const name = element("span", "name");
-  const image = element("span", "image");
-  nameCell.append(name, image);
-
-  const portsCell = element("td");
-  const ports = element("div", "ports");
-  portsCell.append(ports);
-
-  const cpu = buildUsageCell(formatPercent);
-  const mem = buildUsageCell(formatBytes);
-
-  const rxCell = element("td", "num");
-  const txCell = element("td", "num");
-  const statusCell = element("td");
-  const status = element("span", "status");
-  statusCell.append(status);
-
-  tr.append(stateCell, nameCell, portsCell, cpu.cell, mem.cell, rxCell, txCell, statusCell);
-  return {
+  const row = {
     tr,
-    stateIcon,
-    stateLabel,
-    name,
-    image,
-    ports,
+    state: cell("state"),
+    name: cell("name free"),
+    id: cell("id"),
+    image: cell("free"),
+    ports: cell("free"),
     portsKey: null,
-    cpu,
-    mem,
-    rx: new GlidingNumber(rxCell, formatRate),
-    tx: new GlidingNumber(txCell, formatRate),
-    status,
+    memLimit: null,
+    blinkTimer: null,
     leaving: null,
   };
+
+  const cpuCell = cell();
+  const cpuMeter = buildMeter();
+  const cpuValue = element("span");
+  cpuCell.append(cpuMeter.meter, cpuValue);
+  row.cpu = new Glide((share) => {
+    drawMeter(cpuMeter, share);
+    setText(cpuValue, (share == null ? "-" : `${share.toFixed(1)}%`).padStart(7));
+  });
+
+  const memCell = cell();
+  const memMeter = buildMeter();
+  const memValue = element("span");
+  memCell.append(memMeter.meter, memValue);
+  row.mem = new Glide((used) => {
+    const limit = row.memLimit;
+    drawMeter(memMeter, used == null || !limit ? null : (used / limit) * 100);
+    const text = used == null ? "-" : limit ? `${formatBytes(used)}/${formatBytes(limit)}` : formatBytes(used);
+    setText(memValue, text.padStart(12));
+  });
+
+  const rate = (node) => new Glide((value) => setText(node, value == null ? "-" : formatRate(value)));
+  row.rx = rate(cell("num"));
+  row.tx = rate(cell("num"));
+  row.pids = cell("num");
+  row.status = cell("free");
+  return row;
 }
 
 function renderPorts(row, ports) {
@@ -207,61 +195,73 @@ function renderPorts(row, ports) {
   if (key === row.portsKey) return;
   row.portsKey = key;
   row.ports.replaceChildren();
+  row.ports.title = ports.map((p) => `${p.host ?? "-"}->${p.container}/${p.proto}`).join("  ");
   if (!ports.length) {
-    row.ports.append(element("span", "none", "—"));
+    row.ports.append("-");
     return;
   }
-  for (const port of ports.slice(0, MAX_PORTS)) {
-    const chip = element("span", port.host == null ? "port unpublished" : "port", formatPort(port));
-    chip.title =
-      port.host == null
-        ? `${port.container}/${port.proto} is exposed inside Docker only`
-        : `host ${port.host} → container ${port.container}/${port.proto}`;
-    row.ports.append(chip);
+  // Show whole ports only, as many as fit, then how many were left out.
+  let used = 0;
+  let shown = 0;
+  for (const port of ports) {
+    const text = formatPort(port);
+    const hidden = ports.length - shown - 1;
+    const room = PORTS_WIDTH - (hidden ? ` +${hidden}`.length : 0);
+    // The first port is always shown, cut short if it must be: "+1" alone would say nothing.
+    if (shown && used + 1 + text.length > room) break;
+    if (shown) row.ports.append(" ");
+    // Not published to the host means not reachable from outside Docker.
+    row.ports.append(port.host == null ? element("span", "unpublished", text) : text);
+    used += (shown ? 1 : 0) + text.length;
+    shown += 1;
   }
-  if (ports.length > MAX_PORTS) {
-    const more = element("span", "port", `+${ports.length - MAX_PORTS}`);
-    more.title = ports.slice(MAX_PORTS).map(formatPort).join(", ");
-    row.ports.append(more);
-  }
+  if (shown < ports.length) row.ports.append(`${shown ? " " : ""}+${ports.length - shown}`);
+}
+
+// Reverse video, blinked twice: the terminal way of saying "this line changed".
+function blink(row, kind) {
+  clearTimeout(row.blinkTimer);
+  row.tr.dataset.blink = kind;
+  let phase = 0;
+  const next = () => {
+    row.tr.classList.toggle("reverse", phase % 2 === 0);
+    phase += 1;
+    if (phase < (calm ? 2 : 4)) row.blinkTimer = setTimeout(next, calm ? BLINK_MS * 3 : BLINK_MS);
+  };
+  next();
 }
 
 function updateRow(row, container) {
-  const look = STATES[container.state] ?? UNKNOWN_STATE;
   const unhealthy = container.health === "unhealthy";
   const label = unhealthy ? "unhealthy" : container.state;
 
   if (row.tr.dataset.label !== label) {
-    // Skip the flash on the very first render; the row is already sliding in.
-    if (row.tr.dataset.label) row.tr.classList.add("changed");
+    blink(row, row.tr.dataset.label ? "change" : "new");
     row.tr.dataset.label = label;
   }
   row.tr.dataset.state = container.state;
-  row.tr.dataset.tone = unhealthy ? "critical" : look.tone;
-  setText(row.stateIcon, unhealthy ? "!" : look.icon);
-  setText(row.stateLabel, label);
+  row.tr.dataset.tone = unhealthy ? "crit" : (TONES[container.state] ?? "off");
+  setText(row.state, label);
 
   setText(row.name, container.name);
   row.name.title = container.name;
-  setText(row.image, container.image);
+  setText(row.id, container.id);
+  setText(row.image, shortImage(container.image));
   row.image.title = container.image;
   renderPorts(row, container.ports);
 
   // Docker counts 100% per core; the bar shows the share of the whole machine instead.
   // Sampling jitter can land a hair above the maximum, so cap it at 100.
-  const cpuShare =
+  row.cpu.set(
     container.cpu_percent == null || !container.cpu_count
       ? null
-      : Math.min(100, container.cpu_percent / container.cpu_count);
-  setMeter(row.cpu, cpuShare);
-  row.cpu.number.set(cpuShare);
-
-  setMeter(row.mem, container.mem_percent);
-  row.mem.number.set(container.mem_used);
-  setText(row.mem.of, container.mem_limit ? ` / ${formatBytes(container.mem_limit)}` : "");
-
+      : Math.min(100, container.cpu_percent / container.cpu_count),
+  );
+  row.memLimit = container.mem_limit;
+  row.mem.set(container.mem_used);
   row.rx.set(container.net_rx_bps);
   row.tx.set(container.net_tx_bps);
+  setText(row.pids, container.pids == null ? "-" : String(container.pids));
 
   setText(row.status, container.status);
   row.status.title = container.status;
@@ -278,6 +278,8 @@ const rows = new Map();
 
 function removeRow(id, row) {
   if (row.leaving) return;
+  clearTimeout(row.blinkTimer);
+  row.tr.classList.remove("reverse");
   row.tr.classList.add("leaving");
   row.leaving = setTimeout(() => {
     row.tr.remove();
@@ -305,8 +307,7 @@ function alreadyOrdered(positions) {
   return keep;
 }
 
-// Moves as few rows as possible: re-inserting a row cuts its running animations short.
-// Rows that are fading out are not in `wanted` and stay where they are.
+// Moves as few rows as possible. Rows on their way out are not in `wanted` and stay where they are.
 function placeRows(wanted) {
   const position = new Map(Array.from(body.children, (tr, index) => [tr, index]));
   const keep = alreadyOrdered(wanted.map((tr) => position.get(tr) ?? -1));
@@ -321,14 +322,13 @@ function renderContainers(data) {
   panel.classList.toggle("offline", !data.ok);
   notice.hidden = data.ok;
   if (!data.ok) {
-    // Keep the last known rows on screen, dimmed, instead of blanking the panel.
-    setText(notice, `${data.error} — retrying`);
+    // Keep the last known lines on screen, switched off, instead of blanking the panel.
+    setText(notice, `!! ${data.error} -- retrying`);
     setText(count, "offline");
     return;
   }
 
-  const running = data.states.running ?? 0;
-  setText(count, `${running} running / ${data.total} total`);
+  setText(count, `${data.states.running ?? 0}/${data.total} running`);
   empty.hidden = data.total > 0;
 
   const seen = new Set();
@@ -340,7 +340,7 @@ function renderContainers(data) {
       row = buildRow();
       rows.set(container.id, row);
     } else if (row.leaving) {
-      // It came back before its exit animation finished.
+      // It came back before it was taken off the screen.
       clearTimeout(row.leaving);
       row.leaving = null;
       row.tr.classList.remove("leaving");
@@ -354,24 +354,32 @@ function renderContainers(data) {
   }
 }
 
-// --- Connection ------------------------------------------------------------
+// --- Connection and status bar ---------------------------------------------
 
 const host = document.getElementById("host");
 const link = document.getElementById("link");
 const linkLabel = document.getElementById("link-label");
+const spinner = document.getElementById("spinner");
 const clock = document.getElementById("clock");
 
-const LINK_LABELS = { connecting: "Connecting", live: "Live", stale: "Stale data", lost: "Link lost" };
+const LINK_LABELS = {
+  connecting: "connecting",
+  live: "stream ok",
+  stale: "stream stale",
+  lost: "stream lost -- reconnecting",
+};
 
 let source = null;
 let lastMessage = 0;
+let received = 0;
 let retryTimer = null;
 
 function setLink(state) {
   if (link.dataset.state === state) return;
   link.dataset.state = state;
-  setText(linkLabel, LINK_LABELS[state]);
+  // The page reads this too, to switch off numbers that are no longer live.
   document.body.dataset.link = state;
+  setText(linkLabel, LINK_LABELS[state]);
 }
 
 function connect() {
@@ -383,6 +391,9 @@ function connect() {
 
   source.onmessage = (event) => {
     lastMessage = performance.now();
+    received += 1;
+    // One step per snapshot received, so a frozen spinner means a frozen stream.
+    setText(spinner, SPINNER[received % SPINNER.length]);
     setLink("live");
     const snapshot = JSON.parse(event.data);
     setText(host, snapshot.host);
@@ -408,19 +419,12 @@ setInterval(() => {
   }
 }, 1000);
 
-const clockFormat = new Intl.DateTimeFormat(undefined, {
-  weekday: "short",
-  day: "2-digit",
-  month: "short",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
+const two = (number) => String(number).padStart(2, "0");
 
 function tick() {
   const now = new Date();
-  setText(clock, clockFormat.format(now));
+  const date = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`;
+  setText(clock, `${date} ${two(now.getHours())}:${two(now.getMinutes())}:${two(now.getSeconds())}`);
   clock.dateTime = now.toISOString();
 }
 
