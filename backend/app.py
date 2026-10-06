@@ -15,11 +15,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.collectors.containers import ContainerCollector
+from backend.collectors.network import NetworkCollector, label_ports
+from backend.state import StateFile
 
+ROOT = Path(__file__).resolve().parent.parent
 INTERVAL = float(os.environ.get("DASH_INTERVAL", "1"))
 # Idle proxies and browsers drop silent connections; a comment line keeps the stream open.
 KEEPALIVE = 15
-FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
+FRONTEND = ROOT / "frontend"
 
 
 class Hub:
@@ -46,28 +49,41 @@ class Hub:
 
 hub = Hub()
 containers = ContainerCollector()
+network = NetworkCollector(
+    StateFile(os.environ.get("DASH_STATE", ROOT / "data" / "state.json")),
+    iface=os.environ.get("DASH_IFACE") or None,
+    ping_target=os.environ.get("DASH_PING_TARGET", "1.1.1.1"),
+    dns_name=os.environ.get("DASH_DNS_NAME", "example.com"),
+    # Each test moves up to about 75 MB; 0 switches them off.
+    speedtest_hours=float(os.environ.get("DASH_SPEEDTEST_HOURS", "6")),
+    # 0 keeps the dashboard from sending anything onto the network at all.
+    probes_enabled=os.environ.get("DASH_PROBES", "1") != "0",
+)
+
+
+async def collect(name: str, collector, offline: dict) -> dict:
+    try:
+        return await asyncio.to_thread(collector.collect)
+    except Exception as exc:
+        # A collector bug must never take the stream down with it.
+        return {**offline, "ok": False, "error": f"{name} collector failed: {exc}"}
 
 
 async def collect_loop() -> None:
     while True:
         started = time.monotonic()
-        try:
-            container_data = await asyncio.to_thread(containers.collect)
-        except Exception as exc:
-            # A collector bug must never take the stream down with it.
-            container_data = {
-                "ok": False,
-                "error": f"collector failed: {exc}",
-                "total": 0,
-                "states": {},
-                "items": [],
-            }
+        container_data, network_data = await asyncio.gather(
+            collect("containers", containers, {"total": 0, "states": {}, "items": []}),
+            collect("network", network, {}),
+        )
+        label_ports(network_data, container_data)
         await hub.publish(
             {
                 "ts": time.time(),
                 "host": socket.gethostname(),
                 "interval": INTERVAL,
                 "containers": container_data,
+                "network": network_data,
             }
         )
         await asyncio.sleep(max(0.0, INTERVAL - (time.monotonic() - started)))
@@ -80,6 +96,7 @@ async def lifespan(app: FastAPI):
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
+    network.close()
 
 
 app = FastAPI(title="Rack dashboard", lifespan=lifespan)
@@ -113,5 +130,14 @@ async def stream():
     )
 
 
+class FreshStaticFiles(StaticFiles):
+    """Makes the browser ask for a newer copy every time, so an update never mixes old and new files."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 # Mounted last so it never shadows the API routes above.
-app.mount("/", StaticFiles(directory=FRONTEND, html=True), name="frontend")
+app.mount("/", FreshStaticFiles(directory=FRONTEND, html=True), name="frontend")

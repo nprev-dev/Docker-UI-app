@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+from backend.collectors.util import brief
+
 # Only these states have live counters; asking for stats on the rest is wasted work.
 STATS_STATES = {"running", "paused"}
 # A hung daemon must not stall the whole dashboard.
@@ -80,7 +82,7 @@ class ContainerCollector:
             self._drop_client()
             return {
                 "ok": False,
-                "error": f"Docker is not reachable: {_brief(exc)}",
+                "error": f"Docker is not reachable: {brief(exc)}",
                 "total": 0,
                 "states": {},
                 "items": [],
@@ -266,19 +268,3 @@ def _sum(networks: dict, field: str) -> int:
 
 def _round(value: float | None, digits: int) -> float | None:
     return None if value is None else round(value, digits)
-
-
-def _brief(exc: BaseException | None) -> str:
-    """The root cause in a few words; libraries wrap it in several layers of their own errors."""
-    seen = set()
-    while exc is not None and id(exc) not in seen:
-        seen.add(id(exc))
-        inner = exc.__cause__ or exc.__context__
-        if inner is None:
-            break
-        exc = inner
-    if isinstance(exc, OSError) and exc.strerror:
-        text = exc.strerror
-    else:
-        text = " ".join(str(exc).split()) or type(exc).__name__
-    return text if len(text) <= 140 else text[:137] + "..."

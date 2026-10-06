@@ -45,6 +45,51 @@
       </table>
       <p class="empty" id="containers-empty" hidden>-- no containers --</p>
     </section>
+
+    <!-- Text inside .line is laid out with spaces, like terminal output: keep each line on one row of markup. -->
+    <section class="frame" id="network" aria-labelledby="network-title">
+      <h2 class="frame-title" id="network-title">network</h2>
+      <p class="frame-tag" data-f="tag"></p>
+      <p class="alert" data-f="notice" role="status" hidden></p>
+      <div class="panes">
+        <div class="pane">
+          <h3 class="pane-head">THROUGHPUT</h3>
+          <p class="line split"><span><span class="mark mark-rx">||</span> rx <span data-f="rx"></span>  peak <span data-f="rx-peak"></span></span><span class="faint" data-f="rx-scale"></span></p>
+          <canvas class="graph graph-flow" data-f="flow" role="img" aria-label="Traffic received and sent over the last minutes"></canvas>
+          <p class="line split"><span><span class="mark mark-tx">||</span> tx <span data-f="tx"></span>  peak <span data-f="tx-peak"></span></span><span class="faint" data-f="tx-scale"></span></p>
+          <p class="line" data-f="today"></p>
+          <p class="line" data-f="boot"></p>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">LINK</h3>
+          <p class="line free"><span class="key">iface  </span><span data-f="iface"></span><span data-f="iface-state"></span></p>
+          <p class="line free"><span class="key">speed  </span><span data-f="speed"></span></p>
+          <p class="line free"><span class="key">addr   </span><span data-f="addr"></span></p>
+          <p class="line free"><span class="key">gw     </span><span data-f="gateway"></span></p>
+          <p class="line free"><span class="key">mtu    </span><span data-f="mtu"></span></p>
+          <p class="line free"><span class="key">errs   </span><span data-f="errs"></span></p>
+          <p class="line free"><span class="key">drops  </span><span data-f="drops"></span></p>
+          <p class="line free"><span class="key">tcp    </span><span data-f="tcp"></span></p>
+          <p class="line free"><span class="key">udp    </span><span data-f="udp"></span></p>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">LATENCY / WAN</h3>
+          <div data-f="pings"></div>
+          <p class="line free"><span data-f="dns"></span><span data-f="dns-state"></span></p>
+          <p class="line free"><span data-f="wan"></span></p>
+          <p class="line free" data-f="speed1"></p>
+          <p class="line free" data-f="speed2"></p>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">LISTENING ON  WHO</h3>
+          <div data-f="listening"></div>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">TOP TALKERS       RX b/s  TX b/s</h3>
+          <div data-f="talkers"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="statusbar" id="link" data-state="connecting">
@@ -52,6 +97,14 @@
     <time id="clock"></time>
   </footer>
 
+  <script>
+    // If the page's own code fails to load or crashes, say so instead of sitting on "connecting" forever.
+    addEventListener("error", (event) => {
+      const bar = document.getElementById("link");
+      bar.dataset.state = "lost";
+      document.getElementById("link-label").textContent = `page error -- reload needed: ${event.message}`;
+    });
+  </script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

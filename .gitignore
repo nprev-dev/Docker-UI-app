@@ -1,0 +1,6 @@
+# Runtime state: holds this network's public IP address and traffic history.
+data/
+
+.venv/
+__pycache__/
+.pytest_cache/

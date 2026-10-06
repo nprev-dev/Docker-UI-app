@@ -24,6 +24,11 @@
   --ok-bar: #00aa00;
   --crit-bar: #aa0000;
 
+  /* Identity colours for the two directions of traffic; never used for state.
+     Console cyan and magenta: the pair that passed the colour-blindness and contrast checks on black. */
+  --rx: #00aaaa;
+  --tx: #aa00aa;
+
   --mono: "DejaVu Sans Mono", "Liberation Mono", "Noto Mono", monospace;
   --line: 1.3rem;
 }
@@ -47,12 +52,15 @@ body {
 }
 
 h2,
+h3,
 p {
   margin: 0;
   font: inherit;
 }
 
 .screen {
+  display: grid;
+  row-gap: var(--line);
   /* One line above, two columns each side, and room for the status bar below. */
   padding: var(--line) 2ch calc(var(--line) * 2);
 }
@@ -166,6 +174,99 @@ p {
   color: var(--faint);
 }
 
+/* --- Panes: one frame split into columns, each under its own stretch of header bar --- */
+
+.panes {
+  display: grid;
+  /* Each width is the widest line of that pane plus a two-column gap. Listening takes what is left. */
+  grid-template-columns: 57ch 30ch 43ch minmax(0, 1fr) 33ch;
+}
+
+.pane {
+  min-width: 0;
+  padding-right: 2ch;
+}
+
+.pane:first-child {
+  padding-left: 1ch;
+}
+
+.pane:last-child {
+  padding-right: 1ch;
+}
+
+/* The headings reach across the gaps, so together they read as one bar like the table header. */
+.pane-head {
+  margin-right: -2ch;
+  overflow: hidden;
+  background: var(--bar);
+  color: var(--black);
+  white-space: pre;
+}
+
+.pane:first-child .pane-head {
+  margin-left: -1ch;
+  padding-left: 1ch;
+}
+
+.pane:last-child .pane-head {
+  margin-right: -1ch;
+}
+
+.line {
+  height: var(--line);
+  overflow: hidden;
+  white-space: pre;
+}
+
+.line.free {
+  text-overflow: ellipsis;
+}
+
+.line.split {
+  display: flex;
+  justify-content: space-between;
+}
+
+.key,
+.faint {
+  color: var(--faint);
+}
+
+.pane [data-tone="ok"] { color: var(--ok); }
+.pane [data-tone="warn"] { color: var(--warn); }
+.pane [data-tone="crit"] { color: var(--crit); }
+.pane [data-tone="bright"] { color: var(--bright); }
+
+/* A port open to everyone stands out; one open only to this machine recedes. */
+.line[data-scope="*"] .scope { color: var(--bright); }
+.line[data-scope="lo"] { color: var(--faint); }
+
+/* --- Stick graphs: thin vertical strokes, two per character cell ------------ */
+
+.graph {
+  display: block;
+  width: 100%;
+}
+
+.graph-flow {
+  height: calc(var(--line) * 5);
+}
+
+.spark {
+  display: flex;
+}
+
+.spark .graph {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  height: var(--line);
+}
+
+.mark-rx { color: var(--rx); }
+.mark-tx { color: var(--tx); }
+
 /* --- Meter: [||||||      ] ------------------------------------------------- */
 
 .meter {
@@ -203,13 +304,32 @@ p {
   color: var(--bright);
 }
 
+.pane .line.reverse {
+  background: var(--fg);
+}
+
+.pane .line.reverse[data-blink="new"] {
+  background: var(--ok);
+}
+
+.pane .line.reverse,
+.pane .line.reverse * {
+  color: var(--black);
+}
+
 /* While Docker or the stream is unreachable the last known lines stay on screen, switched off,
    so old numbers are never mistaken for live ones. */
 .frame.offline .ctable td,
 .frame.offline .ctable td *,
 body:is([data-link="lost"], [data-link="stale"]) .ctable .row td,
-body:is([data-link="lost"], [data-link="stale"]) .ctable .row td * {
+body:is([data-link="lost"], [data-link="stale"]) .ctable .row td *,
+body:is([data-link="lost"], [data-link="stale"]) .pane .line,
+body:is([data-link="lost"], [data-link="stale"]) .pane .line * {
   color: var(--rule);
+}
+
+body:is([data-link="lost"], [data-link="stale"]) .graph {
+  opacity: 0.3;
 }
 
 /* --- Status bar: one reverse-video line pinned to the bottom -------------- */
