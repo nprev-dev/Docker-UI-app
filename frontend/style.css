@@ -1,35 +1,65 @@
 /*
- * Drawn like a terminal tool, not a web dashboard:
- *   - one font, one size, one weight, everything on a character grid (widths in ch, heights in lines)
- *   - the 16 colours of the Linux text console, each with one job
- *   - square frames with the title cut into the border, reverse-video bars for headers
- *   - no rounded corners, shadows, glows, gradients or easing
+ * A blend of two looks:
+ *   from mission-control screens: deep navy, one blue family, section titles in spaced capitals,
+ *     thin rules instead of boxes, glow on the centrepiece only, colour spent on alarms alone;
+ *   from terminal tools: every value in a monospace on a character grid (widths in ch, heights in
+ *     lines), text meters, dense rows, whole-line reverse-video blinks when something changes.
+ * Nothing is smaller than 0.78rem, and no text sits below 4.5:1 contrast unless it is switched off.
  */
+
+@font-face {
+  font-family: "Plex Sans";
+  font-weight: 400;
+  font-display: block;
+  src: url("fonts/IBMPlexSans-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plex Sans";
+  font-weight: 600;
+  font-display: block;
+  src: url("fonts/IBMPlexSans-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plex Mono";
+  font-weight: 400;
+  font-display: block;
+  src: url("fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Plex Mono";
+  font-weight: 500;
+  font-display: block;
+  src: url("fonts/IBMPlexMono-Medium.woff2") format("woff2");
+}
+
 :root {
   color-scheme: dark;
 
-  --black: #000000;
-  --fg: #aaaaaa;      /* console light gray: normal text */
-  --bright: #ffffff;  /* console white: emphasis, since a console has no bold face */
-  --faint: #777777;   /* the terminal "faint" attribute: secondary text */
-  --rule: #555555;    /* console dark gray: frame lines, switched-off text */
+  --bg: #02030a;
+  --rule: #1a2348;         /* dividers between sections */
+  --rule-bright: #33438a;  /* callout boxes, leader lines */
 
-  --title: #55ffff;   /* bright cyan: frame titles */
-  --bar: #00aaaa;     /* cyan: reverse-video header bar */
+  --ink: #e8ecff;          /* what you look for first */
+  --ink-2: #a5b1dc;        /* normal text */
+  --ink-3: #6f7db4;        /* labels, units, secondary text */
+  --off: #3b4675;          /* switched off: stale or stopped */
 
-  /* Status colours mean state only. */
-  --ok: #55ff55;
-  --warn: #ffff55;
-  --crit: #ff5555;
-  --ok-bar: #00aa00;
-  --crit-bar: #aa0000;
+  --blue: #5d7cff;         /* meters and marks */
+  --accent: #8fd8ff;       /* headline numbers */
 
-  /* Identity colours for the two directions of traffic; never used for state.
-     Console cyan and magenta: the pair that passed the colour-blindness and contrast checks on black. */
-  --rx: #00aaaa;
-  --tx: #aa00aa;
+  /* Identity colours for the two directions of traffic; never used for state. */
+  --rx: #4aa8e0;
+  --tx: #a070e0;
 
-  --mono: "DejaVu Sans Mono", "Liberation Mono", "Noto Mono", monospace;
+  /* State colours appear only when something needs attention. Healthy has no colour. */
+  --warn: #ffb347;
+  --crit: #ff4d5e;
+
+  --sans: "Plex Sans", "Ubuntu Sans", "DejaVu Sans", sans-serif;
+  --mono: "Plex Mono", "DejaVu Sans Mono", monospace;
   --line: 1.3rem;
 }
 
@@ -39,18 +69,20 @@
 
 html {
   /* About 200 columns across whatever screen it is on, so the layout never reflows, it only scales. */
-  font-size: min(calc(100vw / 120), 28px);
+  /* The same on a 16:9 screen either way; the height limit keeps a wider screen from cutting the bottom off. */
+  font-size: min(calc(100vw / 120), calc(100vh / 67.5), 28px);
 }
 
 body {
   margin: 0;
-  min-height: 100vh;
-  background: var(--black);
-  color: var(--fg);
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink-2);
   font: 1rem / var(--line) var(--mono);
   font-variant-ligatures: none;
 }
 
+h1,
 h2,
 h3,
 p {
@@ -58,166 +90,83 @@ p {
   font: inherit;
 }
 
+/* --- Page: key numbers on top, centrepiece and sections in the middle, tables at the bottom --- */
+
 .screen {
   display: grid;
-  row-gap: var(--line);
-  /* One line above, two columns each side, and room for the status bar below. */
-  padding: var(--line) 2ch calc(var(--line) * 2);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  row-gap: calc(var(--line) * 0.6);
+  height: 100vh;
+  padding: calc(var(--line) * 0.4) 2ch;
 }
 
-/* --- Frame: a box with its title cut into the top border ------------------ */
-
-.frame {
-  position: relative;
-  min-width: 0;
-  padding: calc(var(--line) / 2) 1ch;
-  border: 1px solid var(--rule);
-}
-
-.frame-title,
-.frame-tag {
-  position: absolute;
-  top: calc(var(--line) / -2);
-  padding: 0 1ch;
-  background: var(--black);
-}
-
-.frame-title {
-  left: 2ch;
-  color: var(--title);
-}
-
-.frame-tag {
-  right: 2ch;
-}
-
-.alert {
-  margin-bottom: calc(var(--line) / 2);
-  padding: 0 1ch;
-  background: var(--crit-bar);
-  color: var(--bright);
-  overflow-wrap: anywhere;
-}
-
-.empty {
-  padding: 0 1ch;
-  color: var(--faint);
-}
-
-/* --- Table: one container per line ---------------------------------------- */
-
-.ctable {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-/* Each width is the widest value the column can hold plus a one-column gap. Image takes what is left. */
-.col-state { width: 12ch; }
-.col-name { width: 17ch; }
-.col-id { width: 13ch; }
-.col-ports { width: 15ch; }
-.col-cpu { width: 22ch; }
-.col-mem { width: 27ch; }
-.col-net { width: 11ch; }
-.col-pids { width: 6ch; }
-.col-status { width: 29ch; }
-
-.ctable th,
-.ctable td {
-  padding: 0 1ch 0 0;
-  /* One weight everywhere: a console has no bold face, and emphasis is a brighter colour. */
-  font-weight: 400;
-  overflow: hidden;
-  text-align: left;
-  /* Values are padded with spaces to line up, exactly as a terminal program would print them. */
-  white-space: pre;
-}
-
-/* Only free text gets "..." when cut. Fixed-format cells fill their column exactly,
-   and a rounding error of a hundredth of a pixel must not swap their last digits for dots. */
-.ctable .free {
-  text-overflow: ellipsis;
-}
-
-.ctable th:first-child,
-.ctable td:first-child {
-  padding-left: 1ch;
-}
-
-.ctable .num {
-  text-align: right;
-}
-
-/* Reverse video, like the column header of top or htop. */
-.ctable th {
-  background: var(--bar);
-  color: var(--black);
-}
-
-.name {
-  color: var(--bright);
-}
-
-.id,
-.unpublished {
-  color: var(--faint);
-}
-
-.row[data-tone="ok"] .state { color: var(--ok); }
-.row[data-tone="warn"] .state { color: var(--warn); }
-.row[data-tone="crit"] .state { color: var(--crit); }
-
-/* A container that is not running has no live numbers; the whole line goes faint. */
-.row:not([data-state="running"]) td,
-.row:not([data-state="running"]) .name {
-  color: var(--faint);
-}
-
-/* --- Panes: one frame split into columns, each under its own stretch of header bar --- */
-
-.panes {
+.main {
   display: grid;
+  grid-template-columns: 40% minmax(0, 1fr);
+  column-gap: 2ch;
+  min-height: 0;
 }
 
-/* Each width is the widest line of that pane plus a two-column gap; one pane per frame takes what is left. */
-#network .panes {
-  grid-template-columns: 57ch 30ch 43ch minmax(0, 1fr) 33ch;
+.side {
+  display: grid;
+  align-content: space-between;
+  min-height: 0;
 }
 
-#hardware .panes {
-  grid-template-columns: minmax(0, 1fr) 38ch 31ch 31ch 30ch;
+.band,
+.bottom {
+  display: grid;
+  column-gap: 2ch;
 }
 
-.pane {
+/* Each width is the widest line of that section; one section per row takes what is left. */
+.band-a { grid-template-columns: 53ch 27ch minmax(0, 1fr); }
+.band-b { grid-template-columns: 42ch 29ch minmax(0, 1fr); }
+.band-c { grid-template-columns: 29ch 29ch minmax(0, 1fr); }
+.band-d { grid-template-columns: 29ch minmax(0, 1fr); }
+
+/* Fixed heights (a title plus the lines below it), so nothing moves when a reading goes missing. */
+.band-a { height: calc(var(--line) * 10 + 1px); }
+.band-b { height: calc(var(--line) * 9 + 1px); }
+.band-c { height: calc(var(--line) * 8 + 1px); }
+.band-d { height: calc(var(--line) * 6 + 1px); }
+.bottom {
+  grid-template-columns: minmax(0, 1fr) 52ch;
+  /* A title, the column names and nine rows, whatever is running: the page must not jump when a container stops. */
+  height: calc(var(--line) * 11 + 1px);
+}
+
+/* --- Section: a thin rule, a title in spaced capitals, then lines of values --- */
+
+.sec {
   min-width: 0;
-  padding-right: 2ch;
+  border-top: 1px solid var(--rule);
 }
 
-.pane:first-child {
-  padding-left: 1ch;
-}
-
-.pane:last-child {
-  padding-right: 1ch;
-}
-
-/* The headings reach across the gaps, so together they read as one bar like the table header. */
-.pane-head {
-  margin-right: -2ch;
+.sec-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 2ch;
+  height: var(--line);
   overflow: hidden;
-  background: var(--bar);
-  color: var(--black);
-  white-space: pre;
+  white-space: nowrap;
 }
 
-.pane:first-child .pane-head {
-  margin-left: -1ch;
-  padding-left: 1ch;
+.sec-head h3,
+.kpi-label,
+.ctable th,
+.hero-title h2 {
+  color: var(--ink);
+  font: 600 0.78rem / var(--line) var(--sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
-.pane:last-child .pane-head {
-  margin-right: -1ch;
+.sec-meta {
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
 }
 
 .line {
@@ -237,19 +186,159 @@ p {
 
 .key,
 .faint {
-  color: var(--faint);
+  color: var(--ink-3);
 }
 
-.pane [data-tone="ok"] { color: var(--ok); }
-.pane [data-tone="warn"] { color: var(--warn); }
-.pane [data-tone="crit"] { color: var(--crit); }
-.pane [data-tone="bright"] { color: var(--bright); }
+[data-tone="warn"] { color: var(--warn); }
+[data-tone="crit"] { color: var(--crit); }
+[data-tone="bright"] { color: var(--ink); }
 
 /* A port open to everyone stands out; one open only to this machine recedes. */
-.line[data-scope="*"] .scope { color: var(--bright); }
-.line[data-scope="lo"] { color: var(--faint); }
+.line[data-scope="*"] .scope { color: var(--ink); }
+.line[data-scope="lo"] { color: var(--ink-3); }
 
-/* --- Stick graphs: thin vertical strokes, two per character cell ------------ */
+/* --- Top strip: the numbers worth reading from across the room --- */
+
+.top {
+  display: grid;
+  /* Host and clock hold the longest values, the two percentages the shortest. */
+  grid-template-columns: 1.05fr 0.8fr 0.95fr 1fr 1fr 1.05fr 0.9fr 1.25fr;
+  border-bottom: 1px solid var(--rule);
+}
+
+.kpi {
+  display: grid;
+  /* Label and a detail on the first line, the big number under them. */
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: var(--line) calc(var(--line) * 1.6);
+  column-gap: 1.5ch;
+  padding: 0 1.5ch calc(var(--line) * 0.2);
+  border-left: 1px solid var(--rule);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.kpi:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.kpi-label {
+  grid-area: 1 / 1;
+}
+
+.kpi-sub {
+  grid-area: 1 / 2;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  text-align: right;
+  text-overflow: ellipsis;
+}
+
+.kpi-value {
+  grid-area: 2 / 1 / 3 / 3;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 1.9rem;
+  line-height: calc(var(--line) * 1.6);
+  /* The only text that glows, and only faintly: it stays sharp. */
+  text-shadow: 0 0 0.6rem rgba(93, 124, 255, 0.55);
+}
+
+.kpi-value small {
+  margin-left: 0.5ch;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  text-shadow: none;
+}
+
+.kpi[data-tone="warn"] .kpi-value { color: var(--warn); text-shadow: 0 0 0.6rem rgba(255, 179, 71, 0.5); }
+.kpi[data-tone="crit"] .kpi-value { color: var(--crit); text-shadow: 0 0 0.6rem rgba(255, 77, 94, 0.55); }
+.kpi[data-tone="warn"] .kpi-sub { color: var(--warn); }
+.kpi[data-tone="crit"] .kpi-sub { color: var(--crit); }
+
+/* --- Centrepiece --- */
+
+.hero {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.hero canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.hero-title,
+.hero-legend,
+.hero-name {
+  position: absolute;
+  left: 0;
+  white-space: nowrap;
+}
+
+.hero-title {
+  top: 0;
+  display: flex;
+  gap: 2ch;
+}
+
+.hero-legend {
+  bottom: 0;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.hero-name {
+  right: 0;
+  color: var(--ink);
+  font: 600 0.85rem / var(--line) var(--sans);
+  letter-spacing: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+/* A label pinned to one line of the centrepiece. Its position is set by the script. */
+.callout {
+  position: absolute;
+  width: 22ch;
+  padding: 0 1ch;
+  border: 1px solid var(--rule-bright);
+  background: rgba(2, 3, 10, 0.82);
+  overflow: hidden;
+  white-space: nowrap;
+  transition: top 600ms;
+}
+
+.callout b {
+  display: block;
+  overflow: hidden;
+  color: var(--ink);
+  font: 600 0.9rem / var(--line) var(--sans);
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+}
+
+.callout span {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-3);
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+}
+
+.callout[data-tone="warn"] { border-color: var(--warn); }
+.callout[data-tone="warn"] b { color: var(--warn); }
+.callout[data-tone="crit"] { border-color: var(--crit); }
+.callout[data-tone="crit"] b { color: var(--crit); }
+.callout[data-tone="off"] b { color: var(--ink-3); }
+
+/* --- Stick graphs: thin vertical strokes, two per character cell --- */
 
 .graph {
   display: block;
@@ -274,91 +363,150 @@ p {
 .mark-rx { color: var(--rx); }
 .mark-tx { color: var(--tx); }
 
-/* --- Meter: [||||||      ] ------------------------------------------------- */
+/* --- Text meter: [||||||      ] --- */
 
 .meter {
-  color: var(--bright);
+  color: var(--ink-3);
 }
 
 .meter-fill {
-  color: var(--ok);
+  color: var(--blue);
 }
 
 .meter[data-level="warn"] .meter-fill { color: var(--warn); }
 .meter[data-level="crit"] .meter-fill { color: var(--crit); }
 
-/* --- Change signals: whole lines in reverse video ------------------------- */
+/* --- Containers table: one container per line --- */
 
-.ctable .row.reverse td {
-  background: var(--fg);
+.ctable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.ctable .row.reverse[data-blink="new"] td {
-  background: var(--ok);
-}
+/* Each width is the widest value the column can hold plus a one-column gap. Status takes what is left. */
+.col-state { width: 11ch; }
+.col-name { width: 16ch; }
+.col-image { width: 19ch; }
+.col-ports { width: 13ch; }
+.col-cpu { width: 18ch; }
+.col-mem { width: 23ch; }
+.col-net { width: 11ch; }
 
-.ctable .row.leaving td {
-  background: var(--crit-bar);
-}
-
-.ctable .row.reverse td,
-.ctable .row.reverse td * {
-  color: var(--black);
-}
-
-.ctable .row.leaving td,
-.ctable .row.leaving td * {
-  color: var(--bright);
-}
-
-.pane .line.reverse {
-  background: var(--fg);
-}
-
-.pane .line.reverse[data-blink="new"] {
-  background: var(--ok);
-}
-
-.pane .line.reverse,
-.pane .line.reverse * {
-  color: var(--black);
-}
-
-/* While Docker or the stream is unreachable the last known lines stay on screen, switched off,
-   so old numbers are never mistaken for live ones. */
-.frame.offline .ctable td,
-.frame.offline .ctable td *,
-body:is([data-link="lost"], [data-link="stale"]) .ctable .row td,
-body:is([data-link="lost"], [data-link="stale"]) .ctable .row td *,
-body:is([data-link="lost"], [data-link="stale"]) .pane .line,
-body:is([data-link="lost"], [data-link="stale"]) .pane .line * {
-  color: var(--rule);
-}
-
-body:is([data-link="lost"], [data-link="stale"]) .graph {
-  opacity: 0.3;
-}
-
-/* --- Status bar: one reverse-video line pinned to the bottom -------------- */
-
-.statusbar {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  display: flex;
-  justify-content: space-between;
-  gap: 2ch;
-  padding: 0 1ch;
-  background: var(--fg);
-  color: var(--black);
+.ctable th,
+.ctable td {
+  height: var(--line);
+  padding: 0 1ch 0 0;
+  overflow: hidden;
+  text-align: left;
+  /* Values are padded with spaces to line up, exactly as a terminal program would print them. */
   white-space: pre;
 }
 
-.statusbar[data-state="live"] { background: var(--ok-bar); }
-.statusbar[data-state="stale"] { background: var(--warn); }
+.ctable th {
+  color: var(--ink-3);
+  font-weight: 400;
+}
 
-.statusbar[data-state="lost"] {
-  background: var(--crit-bar);
-  color: var(--bright);
+/* Only free text gets "..." when cut. Fixed-format cells fill their column exactly,
+   and a rounding error of a hundredth of a pixel must not swap their last digits for dots. */
+.ctable .free {
+  text-overflow: ellipsis;
+}
+
+.ctable .num {
+  text-align: right;
+}
+
+.name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.unpublished {
+  color: var(--ink-3);
+}
+
+.row[data-tone="warn"] .state { color: var(--warn); }
+.row[data-tone="crit"] .state { color: var(--crit); }
+
+/* A container that is not running has no live numbers; the whole line recedes. */
+.row:not([data-state="running"]) td,
+.row:not([data-state="running"]) .name {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+/* --- Event log --- */
+
+.event .tag {
+  color: var(--ink);
+}
+
+.event[data-tone="warn"] .tag,
+.event[data-tone="warn"] .text { color: var(--warn); }
+
+.event[data-tone="crit"] .tag,
+.event[data-tone="crit"] .text { color: var(--crit); }
+
+/* --- Change signals: whole lines in reverse video, blinked twice --- */
+
+.ctable .row.reverse td,
+.line.reverse {
+  background: var(--ink-2);
+}
+
+.ctable .row.reverse[data-blink="new"] td,
+.line.reverse[data-blink="new"] {
+  background: var(--accent);
+}
+
+.ctable .row.leaving td {
+  background: var(--crit);
+}
+
+.ctable .row.reverse td,
+.ctable .row.reverse td *,
+.ctable .row.leaving td,
+.ctable .row.leaving td *,
+.line.reverse,
+.line.reverse * {
+  color: var(--bg);
+}
+
+/* --- Nothing on screen may pass for live once it is not --- */
+
+.sec.offline .ctable td,
+.sec.offline .ctable td * {
+  color: var(--off);
+}
+
+/* A lost or stalled stream switches every reading off, alarm colours included: they are old news too. */
+body:is([data-link="lost"], [data-link="stale"]) :is(.line, .ctable td, .callout, .kpi-sub, .kpi-value),
+body:is([data-link="lost"], [data-link="stale"]) :is(.line, .ctable td, .callout, .kpi-sub, .kpi-value) * {
+  color: var(--off) !important;
+  text-shadow: none;
+}
+
+body:is([data-link="lost"], [data-link="stale"]) .callout {
+  border-color: var(--rule);
+}
+
+body:is([data-link="lost"], [data-link="stale"]) canvas {
+  opacity: 0.25;
+}
+
+/* The clock keeps running whatever the stream does, and the stream's own state must stay readable. */
+body[data-link] #kpi-clock .kpi-value {
+  color: var(--accent) !important;
+}
+
+body[data-link="stale"] #kpi-clock .kpi-sub,
+body[data-link="stale"] #kpi-clock .kpi-sub * {
+  color: var(--warn) !important;
+}
+
+body[data-link="lost"] #kpi-clock .kpi-sub,
+body[data-link="lost"] #kpi-clock .kpi-sub * {
+  color: var(--crit) !important;
 }

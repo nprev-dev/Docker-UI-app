@@ -525,6 +525,7 @@ class HardwareCollector:
         power = {
             "cpu_w": None if cpu["watts"] is None else round(cpu["watts"], 1),
             "cpu_measured": cpu["measured"],
+            "cpu_load": None if cpu["load"] is None else round(cpu["load"] * 100, 1),
             "gpu_w": round(sum(gpu_watts), 1) if gpu_watts else None,
             "gpu_limit_w": round(sum(limits), 1) if limits else None,
             "rest_w": rest,

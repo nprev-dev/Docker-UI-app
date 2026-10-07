@@ -16,7 +16,8 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.collectors.containers import ContainerCollector
 from backend.collectors.hardware import HardwareCollector
-from backend.collectors.network import NetworkCollector, label_ports
+from backend.collectors.network import NetworkCollector, label_ports, read_boot
+from backend.events import EventLog
 from backend.state import StateFile
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -86,6 +87,11 @@ network = NetworkCollector(
 )
 
 
+events = EventLog(state, own_port=int(os.environ.get("DASH_PORT", "8787")))
+# When the machine came up; the page turns it into an uptime.
+BOOT_TIME = read_boot()[1] or None
+
+
 async def collect(name: str, collector, offline: dict) -> dict:
     try:
         return await asyncio.to_thread(collector.collect)
@@ -103,16 +109,22 @@ async def collect_loop() -> None:
             collect("hardware", hardware, {}),
         )
         label_ports(network_data, container_data)
-        await hub.publish(
-            {
-                "ts": time.time(),
-                "host": socket.gethostname(),
-                "interval": INTERVAL,
-                "containers": container_data,
-                "network": network_data,
-                "hardware": hardware_data,
-            }
-        )
+        snapshot = {
+            "ts": time.time(),
+            "host": socket.gethostname(),
+            "boot": BOOT_TIME,
+            "interval": INTERVAL,
+            "containers": container_data,
+            "network": network_data,
+            "hardware": hardware_data,
+        }
+        try:
+            events.observe(snapshot)
+        except Exception:
+            # The log is a convenience; a bug in it must not cost the live numbers.
+            pass
+        snapshot["events"] = events.recent()
+        await hub.publish(snapshot)
         await asyncio.sleep(max(0.0, INTERVAL - (time.monotonic() - started)))
 
 

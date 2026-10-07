@@ -18,15 +18,18 @@ import {
   surface,
 } from "./common.js";
 
-// Lines available under each pane heading.
-const LIST_ROWS = 9;
+// Lines available under each section heading.
+const TALKER_ROWS = 9;
+const PORT_ROWS = 8;
 // The graphs never zoom in further than this, so idle chatter stays small instead of filling the plot.
 const FLOOR_BPS = 100_000;
 const FLOOR_MS = 0.2;
 const LOSS_WARNING = 0.05;
 const LOSS_CRITICAL = 10;
 
-const f = Object.fromEntries(Array.from(document.getElementById("network").querySelectorAll("[data-f]"), (node) => [node.dataset.f, node]));
+const f = Object.fromEntries(
+  Array.from(document.querySelectorAll('[data-panel="network"] [data-f]'), (node) => [node.dataset.f, node]),
+);
 
 const dash = (value, format = String) => (value == null ? "-" : format(value));
 
@@ -67,8 +70,8 @@ function drawFlow() {
   sticks(s, tx.map((value) => value / txScale), s.colour("--tx"), middle + line, below, false);
   if (hovered != null) {
     const only = (values, scale) => values.map((value, index) => (index === hovered ? value / scale : 0));
-    sticks(s, only(rx, rxScale), s.colour("--bright"), middle, middle, true);
-    sticks(s, only(tx, txScale), s.colour("--bright"), middle + line, below, false);
+    sticks(s, only(rx, rxScale), s.colour("--ink"), middle, middle, true);
+    sticks(s, only(tx, txScale), s.colour("--ink"), middle + line, below, false);
   }
 
   setText(f["rx-peak"], rate(rxPeak));
@@ -164,9 +167,9 @@ function drawSpark(ping) {
   const pad = Math.round(s.height * 0.15);
   const room = s.height - 2 * pad;
   const draw = (pick, colour) => sticks(s, shown.map(pick), s.colour(colour), s.height - pad, room, true);
-  draw((value) => (value == null || value > scale ? 0 : value / scale), "--fg");
+  draw((value) => (value == null || value > scale ? 0 : value / scale), "--ink-2");
   // Off the top of the scale: full height, in the brightest ink.
-  draw((value) => (value != null && value > scale ? 1 : 0), "--bright");
+  draw((value) => (value != null && value > scale ? 1 : 0), "--ink");
   // A lost ping is a full-height stick in the alarm colour.
   draw((value) => (value == null ? 1 : 0), "--crit");
   // The two targets are pinged at very different rates, so say how much time each graph spans.
@@ -256,10 +259,13 @@ function renderListening(entries) {
   listeningKey = key;
   if (entries == null) {
     f.listening.replaceChildren(element("p", "line faint", "-- unavailable --"));
+    setText(f["listening-count"], "");
     return;
   }
   // The last line is given up to say how many did not fit.
-  const shown = entries.slice(0, entries.length > LIST_ROWS ? LIST_ROWS - 1 : LIST_ROWS);
+  const shown = entries.slice(0, entries.length > PORT_ROWS ? PORT_ROWS - 1 : PORT_ROWS);
+  const exposed = entries.filter((entry) => entry.scope === "*" || entry.scope === "lan").length;
+  setText(f["listening-count"], `${entries.length} open, ${exposed} reachable`);
   const lines = shown.map((entry) => {
     const line = element("p", "line free", `${entry.port}/${entry.proto}`.padEnd(10));
     line.dataset.scope = entry.scope;
@@ -280,10 +286,10 @@ function renderTalkers(talkers) {
     return;
   }
   f.talkers.replaceChildren(
-    ...talkers.slice(0, LIST_ROWS).map((talker) => {
+    ...talkers.slice(0, TALKER_ROWS).map((talker) => {
       // An IPv6 address does not fit the column; the tooltip has all of it.
       const host = talker.host.length > 15 ? `${talker.host.slice(0, 14)}…` : talker.host;
-      const text = `${host.padEnd(16)}${formatRateShort(talker.rx_bps).padStart(8)}${formatRateShort(talker.tx_bps).padStart(8)}`;
+      const text = `${host.padEnd(16)}${formatRateShort(talker.rx_bps).padStart(7)}${formatRateShort(talker.tx_bps).padStart(7)}`;
       const line = element("p", "line", text);
       line.title = `${talker.host}, ${talker.conns} connection${talker.conns === 1 ? "" : "s"}`;
       return line;
@@ -298,9 +304,10 @@ export function renderNetwork(data, interval) {
   const now = Date.now() / 1000;
   flow.step = interval || 1;
 
-  f.notice.hidden = data.ok !== false;
-  if (data.ok === false) setText(f.notice, `!! ${data.error ?? "network data unavailable"}`);
-  setText(f.tag, data.link ? `${data.link.name} ${data.link.state}` : "no link");
+  const failed = data.ok === false;
+  f.tag.dataset.tone = failed ? "crit" : "";
+  const link = data.link ? `${data.link.name} ${data.link.state}` : "no link";
+  setText(f.tag, failed ? `!! ${data.error ?? "network data unavailable"}` : link);
 
   rxNow.set(data.rx_bps);
   txNow.set(data.tx_bps);

@@ -1,18 +1,21 @@
-// Containers panel: one line per container, text meters, reverse-video blinks on change.
+// Containers table: one line per container, text meters, reverse-video blinks on change.
 
 import { Glide, blink, buildMeter, drawMeter, element, formatBytes, formatRate, setText, stopBlink } from "./common.js";
 
 const ROW_EXIT_MS = 500;
+// Lines the table has room for; one more container than that and the last line says how many are hidden.
+const MAX_ROWS = 9;
 // Characters the ports column can show; must match its width in style.css minus the gap.
-const PORTS_WIDTH = 14;
+const PORTS_WIDTH = 12;
+const METER_CELLS = 8;
 
 const WARNING_AT = 70;
 const CRITICAL_AT = 90;
 
-// Which status colour each Docker state wears; anything else stays uncoloured.
 const level = (percent) => (percent >= CRITICAL_AT ? "crit" : percent >= WARNING_AT ? "warn" : "ok");
 
-const TONES = { running: "ok", paused: "warn", restarting: "warn", removing: "warn", dead: "crit" };
+// Only states that need attention get a colour; a healthy container has none.
+const TONES = { paused: "warn", restarting: "warn", removing: "warn", dead: "crit" };
 
 function formatPort(port) {
   const suffix = port.proto === "tcp" ? "" : `/${port.proto}`;
@@ -20,10 +23,14 @@ function formatPort(port) {
   return `${port.host}->${port.container}${suffix}`;
 }
 
-// The registry host says where the image came from, not what it is; leave it to the tooltip.
+// "lscr.io/linuxserver/jellyfin:10.11.11" -> "jellyfin:10.11.11". Who published it is left to the tooltip.
 function shortImage(image) {
-  const parts = image.split("/");
-  return parts.length > 1 && /[.:]/.test(parts[0]) ? parts.slice(1).join("/") : image;
+  return image.startsWith("sha256:") ? image : image.split("/").pop();
+}
+
+// Docker's status text, a little shorter: "Exited (0) 3 days ago" -> "Exited (0) 3 days".
+function shortStatus(status) {
+  return status.replace(/ ago$/, "").replace("About a minute", "1 minute").replace("About an hour", "1 hour").replace("Less than a second", "<1 second");
 }
 
 // --- Rows ------------------------------------------------------------------
@@ -36,7 +43,6 @@ function buildRow() {
     tr,
     state: cell("state"),
     name: cell("name free"),
-    id: cell("id"),
     image: cell("free"),
     ports: cell("free"),
     portsKey: null,
@@ -45,7 +51,7 @@ function buildRow() {
   };
 
   const cpuCell = cell();
-  const cpuMeter = buildMeter();
+  const cpuMeter = buildMeter(METER_CELLS);
   const cpuValue = element("span");
   cpuCell.append(cpuMeter.meter, cpuValue);
   row.cpu = new Glide((share) => {
@@ -54,7 +60,7 @@ function buildRow() {
   });
 
   const memCell = cell();
-  const memMeter = buildMeter();
+  const memMeter = buildMeter(METER_CELLS);
   const memValue = element("span");
   memCell.append(memMeter.meter, memValue);
   row.mem = new Glide((used) => {
@@ -68,7 +74,6 @@ function buildRow() {
   const rate = (node) => new Glide((value) => setText(node, value == null ? "-" : formatRate(value)));
   row.rx = rate(cell("num"));
   row.tx = rate(cell("num"));
-  row.pids = cell("num");
   row.status = cell("free");
   return row;
 }
@@ -110,14 +115,13 @@ function updateRow(row, container) {
     row.tr.dataset.label = label;
   }
   row.tr.dataset.state = container.state;
-  row.tr.dataset.tone = unhealthy ? "crit" : (TONES[container.state] ?? "off");
+  row.tr.dataset.tone = unhealthy ? "crit" : (TONES[container.state] ?? "");
   setText(row.state, label);
 
   setText(row.name, container.name);
   row.name.title = container.name;
-  setText(row.id, container.id);
   setText(row.image, shortImage(container.image));
-  row.image.title = container.image;
+  row.image.title = `${container.image}  (${container.id})`;
   renderPorts(row, container.ports);
 
   // Docker counts 100% per core; the bar shows the share of the whole machine instead.
@@ -131,19 +135,17 @@ function updateRow(row, container) {
   row.mem.set(container.mem_used);
   row.rx.set(container.net_rx_bps);
   row.tx.set(container.net_tx_bps);
-  setText(row.pids, container.pids == null ? "-" : String(container.pids));
 
-  setText(row.status, container.status);
+  setText(row.status, shortStatus(container.status));
   row.status.title = container.status;
 }
 
-// --- Panel -----------------------------------------------------------------
+// --- Table -----------------------------------------------------------------
 
-const panel = document.getElementById("containers");
+const section = document.getElementById("containers");
 const body = document.getElementById("containers-body");
 const count = document.getElementById("containers-count");
-const notice = document.getElementById("containers-notice");
-const empty = document.getElementById("containers-empty");
+const more = document.getElementById("containers-more");
 const rows = new Map();
 
 function removeRow(id, row) {
@@ -188,21 +190,30 @@ function placeRows(wanted) {
 }
 
 export function renderContainers(data) {
-  panel.classList.toggle("offline", !data.ok);
-  notice.hidden = data.ok;
+  section.classList.toggle("offline", !data.ok);
+  count.dataset.tone = data.ok ? "" : "crit";
   if (!data.ok) {
-    // Keep the last known lines on screen, switched off, instead of blanking the panel.
-    setText(notice, `!! ${data.error} -- retrying`);
-    setText(count, "offline");
+    // Keep the last known lines on screen, switched off, instead of blanking the table.
+    setText(count, `!! ${data.error} -- retrying`);
     return;
   }
 
-  setText(count, `${data.states.running ?? 0}/${data.total} running`);
-  empty.hidden = data.total > 0;
+  const running = data.states.running ?? 0;
+  setText(count, data.total ? `${running} of ${data.total} running` : "none on this host");
+
+  // The list arrives with running containers first, by name. Anything in trouble moves to the top,
+  // so that when there are more containers than lines, the ones left out are the uneventful ones.
+  const troubled = (item) => item.health === "unhealthy" || item.state in TONES;
+  const ordered = [...data.items.filter(troubled), ...data.items.filter((item) => !troubled(item))];
+  const shown = ordered.slice(0, ordered.length > MAX_ROWS ? MAX_ROWS - 1 : MAX_ROWS);
+  const hidden = ordered.slice(shown.length);
+  more.hidden = !hidden.length;
+  const stillRunning = hidden.filter((item) => item.state === "running").length;
+  setText(more, `+${hidden.length} more not shown (${stillRunning} running, ${hidden.length - stillRunning} stopped)`);
 
   const seen = new Set();
   const wanted = [];
-  for (const container of data.items) {
+  for (const container of shown) {
     seen.add(container.id);
     let row = rows.get(container.id);
     if (!row) {

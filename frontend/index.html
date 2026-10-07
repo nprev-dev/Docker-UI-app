@@ -7,136 +7,157 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <main class="screen">
-    <section class="frame" id="containers" aria-labelledby="containers-title">
-      <h2 class="frame-title" id="containers-title">containers</h2>
-      <p class="frame-tag" id="containers-count"></p>
-      <p class="alert" id="containers-notice" role="status" hidden></p>
-      <table class="ctable">
-        <colgroup>
-          <col class="col-state">
-          <col class="col-name">
-          <col class="col-id">
-          <col class="col-image">
-          <col class="col-ports">
-          <col class="col-cpu">
-          <col class="col-mem">
-          <col class="col-net">
-          <col class="col-net">
-          <col class="col-pids">
-          <col class="col-status">
-        </colgroup>
-        <thead>
-          <tr>
-            <th scope="col">STATE</th>
-            <th scope="col">NAME</th>
-            <th scope="col">ID</th>
-            <th scope="col">IMAGE</th>
-            <th scope="col">PORTS</th>
-            <th scope="col">CPU</th>
-            <th scope="col">MEM USED/LIMIT</th>
-            <th scope="col" class="num">NET RX</th>
-            <th scope="col" class="num">NET TX</th>
-            <th scope="col" class="num">PIDS</th>
-            <th scope="col">STATUS</th>
-          </tr>
-        </thead>
-        <tbody id="containers-body"></tbody>
-      </table>
-      <p class="empty" id="containers-empty" hidden>-- no containers --</p>
-    </section>
+  <!-- Text inside .line is laid out with spaces, like terminal output: keep each line on one row of markup. -->
+  <div class="screen">
+    <header class="top">
+      <div class="kpi" id="kpi-host"><span class="kpi-value" data-k="host">-</span><span class="kpi-label">Host</span><span class="kpi-sub" data-k="uptime"></span></div>
+      <div class="kpi" id="kpi-cpu"><span class="kpi-value"><span data-k="cpu">-</span><small>%</small></span><span class="kpi-label">CPU load</span><span class="kpi-sub" data-k="cpu-temp"></span></div>
+      <div class="kpi" id="kpi-power"><span class="kpi-value"><span data-k="wall">-</span><small>W</small></span><span class="kpi-label">Power</span><span class="kpi-sub" data-k="energy"></span></div>
+      <div class="kpi" id="kpi-rx"><span class="kpi-value"><span data-k="rx">-</span><small data-k="rx-unit"></small></span><span class="kpi-label">Net in</span><span class="kpi-sub" data-k="rx-peak"></span></div>
+      <div class="kpi" id="kpi-tx"><span class="kpi-value"><span data-k="tx">-</span><small data-k="tx-unit"></small></span><span class="kpi-label">Net out</span><span class="kpi-sub" data-k="tx-peak"></span></div>
+      <div class="kpi" id="kpi-containers"><span class="kpi-value" data-k="containers">-</span><span class="kpi-label">Containers</span><span class="kpi-sub" data-k="containers-sub"></span></div>
+      <div class="kpi" id="kpi-internet"><span class="kpi-value"><span data-k="ping">-</span><small>ms</small></span><span class="kpi-label">Internet</span><span class="kpi-sub" data-k="ping-sub"></span></div>
+      <div class="kpi" id="kpi-clock"><time class="kpi-value" id="clock"></time><span class="kpi-label" id="date"></span><span class="kpi-sub"><span id="spinner">-</span> <span id="link-label">connecting</span></span></div>
+    </header>
 
-    <!-- Text inside .line is laid out with spaces, like terminal output: keep each line on one row of markup. -->
-    <section class="frame" id="network" aria-labelledby="network-title">
-      <h2 class="frame-title" id="network-title">network</h2>
-      <p class="frame-tag" data-f="tag"></p>
-      <p class="alert" data-f="notice" role="status" hidden></p>
-      <div class="panes">
-        <div class="pane">
-          <h3 class="pane-head">THROUGHPUT</h3>
-          <p class="line split"><span><span class="mark mark-rx">||</span> rx <span data-f="rx"></span>  peak <span data-f="rx-peak"></span></span><span class="faint" data-f="rx-scale"></span></p>
-          <canvas class="graph graph-flow" data-f="flow" role="img" aria-label="Traffic received and sent over the last minutes"></canvas>
-          <p class="line split"><span><span class="mark mark-tx">||</span> tx <span data-f="tx"></span>  peak <span data-f="tx-peak"></span></span><span class="faint" data-f="tx-scale"></span></p>
-          <p class="line" data-f="today"></p>
-          <p class="line" data-f="boot"></p>
+    <main class="main">
+      <section class="hero" aria-labelledby="hero-title">
+        <canvas id="hero-canvas" role="img" aria-label="The server and everything it is talking to"></canvas>
+        <div class="hero-title"><h2 id="hero-title">Server core</h2><span class="sec-meta" id="hero-meta"></span></div>
+        <p class="hero-name" id="hero-name"></p>
+        <div id="hero-callouts"></div>
+        <p class="hero-legend">brighter line = more traffic   dashes = direction   halo = cpu load</p>
+      </section>
+
+      <div class="side">
+        <div class="band band-a">
+          <section class="sec" data-panel="network">
+            <header class="sec-head"><h3>Throughput</h3><span class="sec-meta" data-f="tag"></span></header>
+            <p class="line split"><span><span class="mark mark-rx">||</span> rx <span data-f="rx"></span>  peak <span data-f="rx-peak"></span></span><span class="faint" data-f="rx-scale"></span></p>
+            <canvas class="graph graph-flow" data-f="flow" role="img" aria-label="Traffic received and sent over the last minutes"></canvas>
+            <p class="line split"><span><span class="mark mark-tx">||</span> tx <span data-f="tx"></span>  peak <span data-f="tx-peak"></span></span><span class="faint" data-f="tx-scale"></span></p>
+            <p class="line" data-f="today"></p>
+            <p class="line" data-f="boot"></p>
+          </section>
+          <section class="sec" data-panel="network">
+            <header class="sec-head"><h3>Link</h3></header>
+            <p class="line free"><span class="key">iface  </span><span data-f="iface"></span><span data-f="iface-state"></span></p>
+            <p class="line free"><span class="key">speed  </span><span data-f="speed"></span></p>
+            <p class="line free"><span class="key">addr   </span><span data-f="addr"></span></p>
+            <p class="line free"><span class="key">gw     </span><span data-f="gateway"></span></p>
+            <p class="line free"><span class="key">mtu    </span><span data-f="mtu"></span></p>
+            <p class="line free"><span class="key">errs   </span><span data-f="errs"></span></p>
+            <p class="line free"><span class="key">drops  </span><span data-f="drops"></span></p>
+            <p class="line free"><span class="key">tcp    </span><span data-f="tcp"></span></p>
+            <p class="line free"><span class="key">udp    </span><span data-f="udp"></span></p>
+          </section>
+          <section class="sec" data-panel="network">
+            <header class="sec-head"><h3>Top talkers</h3><span class="sec-meta">rx / tx, bits/s</span></header>
+            <div data-f="talkers"></div>
+          </section>
         </div>
-        <div class="pane">
-          <h3 class="pane-head">LINK</h3>
-          <p class="line free"><span class="key">iface  </span><span data-f="iface"></span><span data-f="iface-state"></span></p>
-          <p class="line free"><span class="key">speed  </span><span data-f="speed"></span></p>
-          <p class="line free"><span class="key">addr   </span><span data-f="addr"></span></p>
-          <p class="line free"><span class="key">gw     </span><span data-f="gateway"></span></p>
-          <p class="line free"><span class="key">mtu    </span><span data-f="mtu"></span></p>
-          <p class="line free"><span class="key">errs   </span><span data-f="errs"></span></p>
-          <p class="line free"><span class="key">drops  </span><span data-f="drops"></span></p>
-          <p class="line free"><span class="key">tcp    </span><span data-f="tcp"></span></p>
-          <p class="line free"><span class="key">udp    </span><span data-f="udp"></span></p>
+
+        <div class="band band-b">
+          <section class="sec" data-panel="network">
+            <header class="sec-head"><h3>Latency / WAN</h3></header>
+            <div data-f="pings"></div>
+            <p class="line free"><span data-f="dns"></span><span data-f="dns-state"></span></p>
+            <p class="line free"><span data-f="wan"></span></p>
+            <p class="line free" data-f="speed1"></p>
+            <p class="line free" data-f="speed2"></p>
+          </section>
+          <section class="sec" data-panel="network">
+            <header class="sec-head"><h3>Listening</h3><span class="sec-meta" data-f="listening-count"></span></header>
+            <div data-f="listening"></div>
+          </section>
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>Power</h3><span class="sec-meta" data-f="tag"></span></header>
+            <p class="line"><span class="key">cpu    </span><span data-f="cpu"></span><span class="faint" data-f="cpu-note"></span></p>
+            <p class="line"><span class="key">gpu    </span><span data-f="gpu"></span><span class="faint" data-f="gpu-note"></span></p>
+            <p class="line"><span class="key">rest   </span><span data-f="rest"></span><span class="faint">  allowance</span></p>
+            <p class="line"><span class="key">wall   </span><span data-f="wall" data-tone="bright"></span><span class="faint">  with losses</span></p>
+            <p class="line spark"><canvas class="graph" data-f="spark" role="img" aria-label="Estimated power at the wall over the last minutes"></canvas><span class="faint" data-f="spark-label"></span></p>
+            <p class="line free"><span class="key">today  </span><span data-f="today"></span></p>
+            <p class="line free"><span class="key">month  </span><span data-f="month"></span></p>
+          </section>
         </div>
-        <div class="pane">
-          <h3 class="pane-head">LATENCY / WAN</h3>
-          <div data-f="pings"></div>
-          <p class="line free"><span data-f="dns"></span><span data-f="dns-state"></span></p>
-          <p class="line free"><span data-f="wan"></span></p>
-          <p class="line free" data-f="speed1"></p>
-          <p class="line free" data-f="speed2"></p>
+
+        <div class="band band-c">
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>Temperature</h3></header>
+            <div data-f="temps"></div>
+          </section>
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>Fans / volts</h3></header>
+            <div data-f="cooling"></div>
+          </section>
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>Hardware</h3></header>
+            <div data-f="inventory"></div>
+          </section>
         </div>
-        <div class="pane">
-          <h3 class="pane-head">LISTENING ON  WHO</h3>
-          <div data-f="listening"></div>
-        </div>
-        <div class="pane">
-          <h3 class="pane-head">TOP TALKERS       RX b/s  TX b/s</h3>
-          <div data-f="talkers"></div>
+
+        <div class="band band-d">
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>UPS / room</h3></header>
+            <div data-f="ups"></div>
+          </section>
+          <section class="sec" id="agents">
+            <header class="sec-head"><h3>Agents</h3><span class="sec-meta">not connected yet</span></header>
+            <p class="line faint">NAME             STATE      TASK                          LAST ACTION</p>
+            <p class="line faint">-- no agents are reporting --</p>
+            <p class="line"> </p>
+            <p class="line"> </p>
+            <p class="line"> </p>
+          </section>
         </div>
       </div>
-    </section>
+    </main>
 
-    <section class="frame" id="hardware" aria-labelledby="hardware-title">
-      <h2 class="frame-title" id="hardware-title">power / hardware</h2>
-      <p class="frame-tag" data-f="tag"></p>
-      <p class="alert" data-f="notice" role="status" hidden></p>
-      <div class="panes">
-        <div class="pane">
-          <h3 class="pane-head">HARDWARE</h3>
-          <div data-f="inventory"></div>
-        </div>
-        <div class="pane">
-          <h3 class="pane-head">POWER   ~ = estimated</h3>
-          <p class="line"><span class="key">cpu    </span><span data-f="cpu"></span><span class="faint" data-f="cpu-note"></span></p>
-          <p class="line"><span class="key">gpu    </span><span data-f="gpu"></span><span class="faint" data-f="gpu-note"></span></p>
-          <p class="line"><span class="key">rest   </span><span data-f="rest"></span><span class="faint">  allowance</span></p>
-          <p class="line"><span class="key">wall   </span><span data-f="wall" data-tone="bright"></span><span class="faint">  with losses</span></p>
-          <p class="line spark"><canvas class="graph" data-f="spark" role="img" aria-label="Estimated power at the wall over the last minutes"></canvas><span class="faint" data-f="spark-label"></span></p>
-          <p class="line free"><span class="key">today  </span><span data-f="today"></span></p>
-          <p class="line free"><span class="key">month  </span><span data-f="month"></span></p>
-        </div>
-        <div class="pane">
-          <h3 class="pane-head">TEMPERATURE</h3>
-          <div data-f="temps"></div>
-        </div>
-        <div class="pane">
-          <h3 class="pane-head">FANS / VOLTS</h3>
-          <div data-f="cooling"></div>
-        </div>
-        <div class="pane">
-          <h3 class="pane-head">UPS / ROOM</h3>
-          <div data-f="ups"></div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="statusbar" id="link" data-state="connecting">
-    <span><span id="spinner">-</span> [<span id="host">?</span>] <span id="link-label">connecting</span></span>
-    <time id="clock"></time>
-  </footer>
+    <footer class="bottom">
+      <section class="sec" id="containers">
+        <header class="sec-head"><h3>Containers</h3><span class="sec-meta" id="containers-count"></span></header>
+        <table class="ctable">
+          <colgroup>
+            <col class="col-state">
+            <col class="col-name">
+            <col class="col-image">
+            <col class="col-ports">
+            <col class="col-cpu">
+            <col class="col-mem">
+            <col class="col-net">
+            <col class="col-net">
+            <col class="col-status">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">State</th>
+              <th scope="col">Name</th>
+              <th scope="col">Image</th>
+              <th scope="col">Ports</th>
+              <th scope="col">CPU</th>
+              <th scope="col">Memory</th>
+              <th scope="col" class="num">Net rx</th>
+              <th scope="col" class="num">Net tx</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody id="containers-body"></tbody>
+        </table>
+        <p class="line faint" id="containers-more" hidden></p>
+      </section>
+      <section class="sec" id="events">
+        <header class="sec-head"><h3>Event log</h3><span class="sec-meta">newest first</span></header>
+        <div id="log"></div>
+      </section>
+    </footer>
+  </div>
 
   <script>
     // If the page's own code fails to load or crashes, say so instead of sitting on "connecting" forever.
     addEventListener("error", (event) => {
-      const bar = document.getElementById("link");
-      bar.dataset.state = "lost";
-      document.getElementById("link-label").textContent = `page error -- reload needed: ${event.message}`;
+      document.body.dataset.link = "lost";
+      document.getElementById("link-label").textContent = `page error -- reload: ${event.message}`;
     });
   </script>
   <script type="module" src="app.js"></script>

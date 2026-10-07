@@ -33,6 +33,9 @@ export const formatRateShort = (bitsPerSecond) => scaled(bitsPerSecond, 1000, ["
 // Counters that can run into the billions on a long-lived machine: exact while short, rounded once long.
 export const formatCount = (count) => (count < 100000 ? String(count) : scaled(count, 1000, ["", "K", "M", "G", "T"], ""));
 
+// Watt-hours while a total is still small, kilowatt-hours once it is not.
+export const formatEnergy = (wh) => (wh < 999.5 ? `${wh.toFixed(wh < 9.95 ? 1 : 0)} Wh` : `${(wh / 1000).toFixed(2)} kWh`);
+
 export function formatMs(ms) {
   return `${ms.toFixed(ms >= 99.95 ? 0 : ms >= 9.995 ? 1 : 2)} ms`;
 }
@@ -154,22 +157,20 @@ export function stopBlink(node) {
 
 // --- Text meter: [||||||      ] ----------------------------------------------
 
-export const METER_CELLS = 12;
-
-export function buildMeter() {
+export function buildMeter(cells = 12) {
   const meter = element("span", "meter");
   const fill = element("span", "meter-fill");
   const rest = element("span");
   meter.append("[", fill, rest, "]");
-  return { meter, fill, rest };
+  return { meter, fill, rest, cells };
 }
 
 // `percent` fills the bar; `level` ("ok", "warn" or "crit") colours it.
-export function drawMeter({ meter, fill, rest }, percent, level = "ok") {
+export function drawMeter({ meter, fill, rest, cells: width }, percent, level = "ok") {
   // Rounded up like htop, so any real load shows at least one bar; "0.0%" shows none.
-  const cells = percent == null || percent < 0.05 ? 0 : Math.min(METER_CELLS, Math.ceil((percent / 100) * METER_CELLS));
+  const cells = percent == null || percent < 0.05 ? 0 : Math.min(width, Math.ceil((percent / 100) * width));
   setText(fill, "|".repeat(cells));
-  setText(rest, " ".repeat(METER_CELLS - cells));
+  setText(rest, " ".repeat(width - cells));
   meter.dataset.level = level;
 }
 

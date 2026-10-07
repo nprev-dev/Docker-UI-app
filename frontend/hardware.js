@@ -8,28 +8,30 @@ import {
   element,
   formatBytes,
   formatDuration,
+  formatEnergy,
   niceCeil,
   setText,
   sticks,
   surface,
 } from "./common.js";
 
-// Lines available under each pane heading.
+// Lines available under each section heading; the UPS section sits in a shorter row.
 const LIST_ROWS = 7;
+const UPS_ROWS = 5;
 // The power graph never zooms in further than this, so a quiet machine does not look like a busy one.
 const FLOOR_WATTS = 50;
 
-const f = Object.fromEntries(Array.from(document.getElementById("hardware").querySelectorAll("[data-f]"), (node) => [node.dataset.f, node]));
+const f = Object.fromEntries(
+  Array.from(document.querySelectorAll('[data-panel="hardware"] [data-f]'), (node) => [node.dataset.f, node]),
+);
 
 const dash = (value, format = String) => (value == null ? "-" : format(value));
 const key = (name) => element("span", "key", name.padEnd(7));
 const watts = (value, digits = 1) => `${value.toFixed(value >= 99.95 ? 0 : digits)} W`;
-// Watt-hours while the day's total is still small, kilowatt-hours once it is not.
-const energy = (wh) => (wh < 999.5 ? `${wh.toFixed(wh < 9.95 ? 1 : 0)} Wh` : `${(wh / 1000).toFixed(2)} kWh`);
 
 // Replaces a pane's lines, keeping to its height: the last line says how many did not fit.
-function fill(node, lines) {
-  const shown = lines.slice(0, lines.length > LIST_ROWS ? LIST_ROWS - 1 : LIST_ROWS);
+function fill(node, lines, rows = LIST_ROWS) {
+  const shown = lines.slice(0, lines.length > rows ? rows - 1 : rows);
   if (lines.length > shown.length) shown.push(element("p", "line faint", `+${lines.length - shown.length} more`));
   node.replaceChildren(...shown);
 }
@@ -85,7 +87,7 @@ function drawPower() {
   const scale = niceCeil(Math.max(FLOOR_WATTS, peak));
   // A little air above and below, so the sticks do not touch the text lines.
   const pad = Math.round(s.height * 0.15);
-  sticks(s, shown.map((value) => value / scale), s.colour("--fg"), s.height - pad, s.height - 2 * pad, true);
+  sticks(s, shown.map((value) => value / scale), s.colour("--ink-2"), s.height - pad, s.height - 2 * pad, true);
   const span = formatDuration(shown.length * power.step).padStart(3);
   setText(f["spark-label"], shown.length ? ` ${span} max ${watts(peak, 0)}` : "");
 }
@@ -106,7 +108,7 @@ function renderPower(data) {
   const today = data.today;
   setText(
     f.today,
-    today ? energy(today.wh).padStart(8) + `  over ${formatDuration(today.counted_s)}` : "-".padStart(8),
+    today ? formatEnergy(today.wh).padStart(8) + `  over ${formatDuration(today.counted_s)}` : "-".padStart(8),
   );
   const cost = data.month_cost == null ? "no price set" : `~${data.currency}${data.month_cost.toFixed(2)}`;
   setText(f.month, data.month_kwh == null ? "-".padStart(8) : `~${data.month_kwh.toFixed(0)} kWh`.padStart(8) + `  ${cost}`);
@@ -209,20 +211,17 @@ function renderUps(ups, room) {
   } else {
     lines.push(line("room", `${room.c.toFixed(1)}°C`));
   }
-  fill(f.ups, lines);
+  fill(f.ups, lines, UPS_ROWS);
 }
 
 // --- Panel -----------------------------------------------------------------------
 
 export function renderHardware(data) {
   if (!data) return;
-  f.notice.hidden = data.ok !== false;
-  if (data.ok === false) {
-    setText(f.notice, `!! ${data.error ?? "hardware data unavailable"}`);
-    setText(f.tag, "unavailable");
-    return;
-  }
-  setText(f.tag, data.power?.wall_w == null ? "" : `~${watts(data.power.wall_w, 0)} at the wall`);
+  const failed = data.ok === false;
+  f.tag.dataset.tone = failed ? "crit" : "";
+  setText(f.tag, failed ? `!! ${data.error ?? "hardware data unavailable"}` : "~ = estimated");
+  if (failed) return;
   renderInventory(data.inventory ?? {});
   renderPower(data.power ?? {});
   renderTemps(data.temps ?? []);
