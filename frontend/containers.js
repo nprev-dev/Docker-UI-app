@@ -1,16 +1,17 @@
 // Containers panel: one line per container, text meters, reverse-video blinks on change.
 
-import { Glide, blink, element, formatBytes, formatRate, setText, stopBlink } from "./common.js";
+import { Glide, blink, buildMeter, drawMeter, element, formatBytes, formatRate, setText, stopBlink } from "./common.js";
 
 const ROW_EXIT_MS = 500;
 // Characters the ports column can show; must match its width in style.css minus the gap.
 const PORTS_WIDTH = 14;
-const METER_CELLS = 12;
 
 const WARNING_AT = 70;
 const CRITICAL_AT = 90;
 
 // Which status colour each Docker state wears; anything else stays uncoloured.
+const level = (percent) => (percent >= CRITICAL_AT ? "crit" : percent >= WARNING_AT ? "warn" : "ok");
+
 const TONES = { running: "ok", paused: "warn", restarting: "warn", removing: "warn", dead: "crit" };
 
 function formatPort(port) {
@@ -23,24 +24,6 @@ function formatPort(port) {
 function shortImage(image) {
   const parts = image.split("/");
   return parts.length > 1 && /[.:]/.test(parts[0]) ? parts.slice(1).join("/") : image;
-}
-
-// --- Meters ----------------------------------------------------------------
-
-function buildMeter() {
-  const meter = element("span", "meter");
-  const fill = element("span", "meter-fill");
-  const rest = element("span");
-  meter.append("[", fill, rest, "]");
-  return { meter, fill, rest };
-}
-
-function drawMeter({ meter, fill, rest }, percent) {
-  // Rounded up like htop, so any real load shows at least one bar; "0.0%" shows none.
-  const cells = percent == null || percent < 0.05 ? 0 : Math.min(METER_CELLS, Math.ceil((percent / 100) * METER_CELLS));
-  setText(fill, "|".repeat(cells));
-  setText(rest, " ".repeat(METER_CELLS - cells));
-  meter.dataset.level = percent >= CRITICAL_AT ? "crit" : percent >= WARNING_AT ? "warn" : "ok";
 }
 
 // --- Rows ------------------------------------------------------------------
@@ -66,7 +49,7 @@ function buildRow() {
   const cpuValue = element("span");
   cpuCell.append(cpuMeter.meter, cpuValue);
   row.cpu = new Glide((share) => {
-    drawMeter(cpuMeter, share);
+    drawMeter(cpuMeter, share, level(share));
     setText(cpuValue, (share == null ? "-" : `${share.toFixed(1)}%`).padStart(7));
   });
 
@@ -76,7 +59,8 @@ function buildRow() {
   memCell.append(memMeter.meter, memValue);
   row.mem = new Glide((used) => {
     const limit = row.memLimit;
-    drawMeter(memMeter, used == null || !limit ? null : (used / limit) * 100);
+    const percent = used == null || !limit ? null : (used / limit) * 100;
+    drawMeter(memMeter, percent, level(percent));
     const text = used == null ? "-" : limit ? `${formatBytes(used)}/${formatBytes(limit)}` : formatBytes(used);
     setText(memValue, text.padStart(12));
   });

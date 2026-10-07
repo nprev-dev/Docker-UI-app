@@ -94,8 +94,7 @@ def state(tmp_path):
 
 
 def make(machine, state, **over):
-    return NetworkCollector(
-        state,
+    settings = dict(
         probes_enabled=False,
         route=lambda: machine.route,
         link=lambda name: machine.link if machine.link and machine.link["name"] == name else None,
@@ -103,8 +102,8 @@ def make(machine, state, **over):
         clock=lambda: machine.wall,
         monotonic=lambda: machine.now,
         boot=lambda: machine.boot,
-        **over,
     )
+    return NetworkCollector(state, **{**settings, **over})
 
 
 # --- routes -------------------------------------------------------------------
@@ -625,6 +624,81 @@ def test_probes_switched_off_report_nothing(machine, state):
     result = make(machine, state).collect()
 
     assert result["ping"] == [] and result["dns"] is None and result["wan"] is None and result["speedtest"] is None
+
+
+class FakePinger:
+    made = []
+
+    def __init__(self, host, interval=1.0):
+        self.host, self.interval, self.stopped = host, interval, False
+        FakePinger.made.append(self)
+
+    def start(self):
+        pass
+
+    def stop(self):
+        self.stopped = True
+
+    def summary(self):
+        return {"host": self.host, "interval": self.interval, "history": []}
+
+
+@pytest.fixture
+def probing(machine, state, monkeypatch):
+    """A collector with probes on, but with stand-ins so nothing is sent onto the network."""
+    FakePinger.made = []
+    monkeypatch.setattr(mod.probes, "Pinger", FakePinger)
+    monkeypatch.setattr(mod.probes.Every, "start", lambda self: None)
+    monkeypatch.setattr(mod.probes.SpeedTester, "start", lambda self: None)
+
+    def build(**over):
+        return make(machine, state, **{"probes_enabled": True, "speedtest_hours": 0, **over})
+
+    return build
+
+
+def test_outside_target_is_pinged_far_less_often_than_the_gateway(probing):
+    result = probing().collect()
+
+    cadence = {p["name"]: (p["host"], p["interval"]) for p in result["ping"]}
+    assert cadence == {"gateway": ("192.168.1.1", 1.0), "internet": ("1.1.1.1", 30.0)}
+
+
+def test_ping_interval_can_be_set_but_not_below_one_second(probing):
+    assert {p["name"]: p["interval"] for p in probing(ping_interval=120).collect()["ping"]}["internet"] == 120
+    FakePinger.made = []
+    assert {p["name"]: p["interval"] for p in probing(ping_interval=0).collect()["ping"]}["internet"] == 1.0
+
+
+def test_pingers_are_started_once_and_kept(machine, probing):
+    collector = probing()
+    for _ in range(5):
+        collector.collect()
+        machine.tick(1.0)
+
+    assert [(p.host, p.interval) for p in FakePinger.made] == [("192.168.1.1", 1.0), ("1.1.1.1", 30.0)]
+    assert not any(p.stopped for p in FakePinger.made)
+
+
+def test_new_gateway_gets_a_new_pinger_and_keeps_the_internet_history(machine, probing):
+    collector = probing()
+    collector.collect()
+    machine.route = ("enp3s0", "10.0.0.1")
+
+    result = collector.collect()
+
+    old_gateway, internet, new_gateway = FakePinger.made
+    assert old_gateway.stopped and not internet.stopped
+    assert (new_gateway.host, new_gateway.interval) == ("10.0.0.1", 1.0)
+    assert [p["host"] for p in result["ping"]] == ["10.0.0.1", "1.1.1.1"]
+
+
+def test_no_gateway_means_no_gateway_pinger(machine, probing):
+    machine.route = ("enp3s0", None)
+
+    result = probing().collect()
+
+    assert [p["name"] for p in result["ping"]] == ["internet"]
 
 
 def test_result_is_plain_json(machine, state):

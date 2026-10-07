@@ -2,6 +2,7 @@
 
 import { formatDate, formatTime, setText } from "./common.js";
 import { renderContainers } from "./containers.js";
+import { renderHardware } from "./hardware.js";
 import { renderNetwork } from "./network.js";
 
 // No message for this long means the numbers on screen can no longer be trusted.
@@ -64,6 +65,7 @@ function connect() {
     setText(host, snapshot.host);
     render("containers", renderContainers, snapshot.containers);
     render("network", (data) => renderNetwork(data, snapshot.interval), snapshot.network);
+    render("hardware", renderHardware, snapshot.hardware);
   };
 
   source.onerror = () => {

@@ -160,6 +160,46 @@ def test_ping_not_permitted_is_reported_without_inventing_losses():
     assert list(pinger.results) == [] and pinger.error == "ping is not permitted for this user"
 
 
+def test_slow_cadence_does_not_slow_down_noticing_a_lost_ping():
+    waits = []
+
+    class Recording(Flow):
+        def settimeout(self, seconds):
+            waits.append(seconds)
+
+    opened = []
+
+    def open_socket():
+        opened.append(Recording(answers=False))
+        return opened[-1]
+
+    pinger = probes.Pinger("192.0.2.1", interval=30, timeout=0.05, open_socket=open_socket)
+    pinger.ping_once()
+
+    # Lost after the short timeout, not after the 30-second interval.
+    assert list(pinger.results) == [None]
+    assert waits and max(waits) <= 0.05
+    assert pinger.summary()["interval"] == 30
+
+
+def test_timeout_never_exceeds_the_interval():
+    assert probes.Pinger("192.0.2.1", interval=0.5, timeout=1.0).timeout == 0.5
+    assert probes.Pinger("192.0.2.1", interval=30).timeout == 1.0
+
+
+def test_old_results_are_kept_between_pings():
+    flow = Flow(answers=True)
+    pinger, _ = pinger_with([flow], keep=120)
+    for _ in range(3):
+        pinger.ping_once()
+    before = list(pinger.results)
+
+    # Reading the summary any number of times between pings changes nothing.
+    assert [pinger.summary()["history"] for _ in range(3)] == [[round(r, 2) for r in before]] * 3
+    pinger.ping_once()
+    assert list(pinger.results)[:3] == before and len(pinger.results) == 4
+
+
 def test_history_is_capped_to_the_window():
     pinger, _ = pinger_with([Flow(answers=True)], keep=10)
 
@@ -185,7 +225,7 @@ def test_ping_summary():
     summary = probes.ping_summary("1.1.1.1", [10.0, None, 30.0, 20.004])
 
     assert summary == {
-        "host": "1.1.1.1", "last": 20.0, "avg": 20.0, "max": 30.0, "loss": 25.0,
+        "host": "1.1.1.1", "interval": 1.0, "last": 20.0, "avg": 20.0, "max": 30.0, "loss": 25.0,
         "history": [10.0, None, 30.0, 20.0], "error": None,
     }
 

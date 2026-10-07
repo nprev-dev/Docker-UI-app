@@ -90,6 +90,40 @@
         </div>
       </div>
     </section>
+
+    <section class="frame" id="hardware" aria-labelledby="hardware-title">
+      <h2 class="frame-title" id="hardware-title">power / hardware</h2>
+      <p class="frame-tag" data-f="tag"></p>
+      <p class="alert" data-f="notice" role="status" hidden></p>
+      <div class="panes">
+        <div class="pane">
+          <h3 class="pane-head">HARDWARE</h3>
+          <div data-f="inventory"></div>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">POWER   ~ = estimated</h3>
+          <p class="line"><span class="key">cpu    </span><span data-f="cpu"></span><span class="faint" data-f="cpu-note"></span></p>
+          <p class="line"><span class="key">gpu    </span><span data-f="gpu"></span><span class="faint" data-f="gpu-note"></span></p>
+          <p class="line"><span class="key">rest   </span><span data-f="rest"></span><span class="faint">  allowance</span></p>
+          <p class="line"><span class="key">wall   </span><span data-f="wall" data-tone="bright"></span><span class="faint">  with losses</span></p>
+          <p class="line spark"><canvas class="graph" data-f="spark" role="img" aria-label="Estimated power at the wall over the last minutes"></canvas><span class="faint" data-f="spark-label"></span></p>
+          <p class="line free"><span class="key">today  </span><span data-f="today"></span></p>
+          <p class="line free"><span class="key">month  </span><span data-f="month"></span></p>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">TEMPERATURE</h3>
+          <div data-f="temps"></div>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">FANS / VOLTS</h3>
+          <div data-f="cooling"></div>
+        </div>
+        <div class="pane">
+          <h3 class="pane-head">UPS / ROOM</h3>
+          <div data-f="ups"></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="statusbar" id="link" data-state="connecting">

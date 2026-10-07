@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.collectors.containers import ContainerCollector
+from backend.collectors.hardware import HardwareCollector
 from backend.collectors.network import NetworkCollector, label_ports
 from backend.state import StateFile
 
@@ -47,12 +48,36 @@ class Hub:
             return self.sequence, self.snapshot
 
 
+def number(name: str) -> float | None:
+    """An optional numeric setting; unset or empty means "not given"."""
+    value = os.environ.get(name, "").strip()
+    return float(value) if value else None
+
+
 hub = Hub()
+state = StateFile(os.environ.get("DASH_STATE", ROOT / "data" / "state.json"))
 containers = ContainerCollector()
+hardware = HardwareCollector(
+    state,
+    # What a kilowatt-hour costs, for the monthly figure. Unset shows energy only.
+    price=number("DASH_KWH_PRICE"),
+    currency=os.environ.get("DASH_CURRENCY", "$"),
+    # Watts for everything without a power sensor; unset uses the built-in allowance. Calibrate this
+    # against a metering plug if one is ever at hand.
+    base_watts=number("DASH_POWER_BASE_W"),
+    psu_efficiency=number("DASH_PSU_EFFICIENCY") or 0.87,
+    # Used only while the processor's energy counter is not readable (see hardware.py).
+    cpu_idle_watts=number("DASH_CPU_IDLE_W") or 25.0,
+    cpu_max_watts=number("DASH_CPU_MAX_W") or 142.0,
+    # Any file holding a temperature, for a room or rack sensor.
+    room_sensor=os.environ.get("DASH_ROOM_SENSOR") or None,
+)
 network = NetworkCollector(
-    StateFile(os.environ.get("DASH_STATE", ROOT / "data" / "state.json")),
+    state,
     iface=os.environ.get("DASH_IFACE") or None,
     ping_target=os.environ.get("DASH_PING_TARGET", "1.1.1.1"),
+    # Seconds between pings to that outside target.
+    ping_interval=float(os.environ.get("DASH_PING_INTERVAL", "30")),
     dns_name=os.environ.get("DASH_DNS_NAME", "example.com"),
     # Each test moves up to about 75 MB; 0 switches them off.
     speedtest_hours=float(os.environ.get("DASH_SPEEDTEST_HOURS", "6")),
@@ -72,9 +97,10 @@ async def collect(name: str, collector, offline: dict) -> dict:
 async def collect_loop() -> None:
     while True:
         started = time.monotonic()
-        container_data, network_data = await asyncio.gather(
+        container_data, network_data, hardware_data = await asyncio.gather(
             collect("containers", containers, {"total": 0, "states": {}, "items": []}),
             collect("network", network, {}),
+            collect("hardware", hardware, {}),
         )
         label_ports(network_data, container_data)
         await hub.publish(
@@ -84,6 +110,7 @@ async def collect_loop() -> None:
                 "interval": INTERVAL,
                 "containers": container_data,
                 "network": network_data,
+                "hardware": hardware_data,
             }
         )
         await asyncio.sleep(max(0.0, INTERVAL - (time.monotonic() - started)))
@@ -97,6 +124,7 @@ async def lifespan(app: FastAPI):
     with suppress(asyncio.CancelledError):
         await task
     network.close()
+    hardware.close()
 
 
 app = FastAPI(title="Rack dashboard", lifespan=lifespan)

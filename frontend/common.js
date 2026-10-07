@@ -152,6 +152,27 @@ export function stopBlink(node) {
   node.classList.remove("reverse");
 }
 
+// --- Text meter: [||||||      ] ----------------------------------------------
+
+export const METER_CELLS = 12;
+
+export function buildMeter() {
+  const meter = element("span", "meter");
+  const fill = element("span", "meter-fill");
+  const rest = element("span");
+  meter.append("[", fill, rest, "]");
+  return { meter, fill, rest };
+}
+
+// `percent` fills the bar; `level` ("ok", "warn" or "crit") colours it.
+export function drawMeter({ meter, fill, rest }, percent, level = "ok") {
+  // Rounded up like htop, so any real load shows at least one bar; "0.0%" shows none.
+  const cells = percent == null || percent < 0.05 ? 0 : Math.min(METER_CELLS, Math.ceil((percent / 100) * METER_CELLS));
+  setText(fill, "|".repeat(cells));
+  setText(rest, " ".repeat(METER_CELLS - cells));
+  meter.dataset.level = level;
+}
+
 // --- Character grid ----------------------------------------------------------
 
 let cell = null;
@@ -171,3 +192,49 @@ export function cellWidth() {
 addEventListener("resize", () => {
   cell = null;
 });
+
+// --- Stick graphs ------------------------------------------------------------
+
+// Round a maximum up to 1, 2 or 5 times a power of ten, so the scale reads cleanly and does not twitch.
+export function niceCeil(value) {
+  const power = 10 ** Math.floor(Math.log10(value));
+  const lead = value / power;
+  return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * power;
+}
+
+export function surface(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.round(canvas.clientWidth * ratio);
+  const height = Math.round(canvas.clientHeight * ratio);
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, width, height);
+  // Two sticks per character cell: thin vertical strokes, like the | of the meters stood on end.
+  const pitch = Math.max(2, Math.round((cellWidth() * ratio) / 2));
+  const style = getComputedStyle(canvas);
+  return {
+    context,
+    width,
+    height,
+    ratio,
+    pitch,
+    stroke: Math.max(1, Math.floor(pitch / 4)),
+    slots: Math.floor(width / pitch),
+    colour: (name) => style.getPropertyValue(name).trim(),
+  };
+}
+
+// Draws one stick per value, newest at the right edge. `shares` are 0..1 of `room`.
+export function sticks(s, shares, colour, base, room, upward) {
+  s.context.fillStyle = colour;
+  const first = s.width - shares.length * s.pitch + Math.floor((s.pitch - s.stroke) / 2);
+  shares.forEach((share, index) => {
+    if (!(share > 0)) return;
+    // Any traffic at all shows at least one pixel.
+    const length = Math.max(1, Math.round(Math.min(1, share) * room));
+    s.context.fillRect(first + index * s.pitch, upward ? base - length : base, s.stroke, length);
+  });
+}

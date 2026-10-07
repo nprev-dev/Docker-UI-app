@@ -51,10 +51,11 @@ def echo(sock: socket.socket, host: str, sequence: int, timeout: float) -> float
             return (time.perf_counter() - sent) * 1000
 
 
-def ping_summary(host: str, results: list[float | None], error: str | None = None) -> dict:
+def ping_summary(host: str, results: list[float | None], error: str | None = None, interval: float = 1.0) -> dict:
     answered = [r for r in results if r is not None]
     return {
         "host": host,
+        "interval": interval,
         "last": _round(results[-1]) if results else None,
         "avg": _round(sum(answered) / len(answered)) if answered else None,
         "max": _round(max(answered)) if answered else None,
@@ -70,13 +71,16 @@ def open_icmp() -> socket.socket:
 
 
 class Pinger(threading.Thread):
-    """Pings one host once a second and remembers the last two minutes."""
+    """Pings one host every `interval` seconds and remembers the last `keep` results."""
 
-    def __init__(self, host: str, interval: float = 1.0, keep: int = 120,
+    def __init__(self, host: str, interval: float = 1.0, keep: int = 120, timeout: float = 1.0,
                  open_socket: Callable[[], socket.socket] = open_icmp):
         super().__init__(daemon=True, name=f"ping-{host}")
         self.host = host
         self.interval = interval
+        # How long to wait for a reply. Kept apart from the interval: a slow cadence must not
+        # turn into a half-minute wait before a ping counts as lost.
+        self.timeout = min(timeout, interval)
         self.results: deque[float | None] = deque(maxlen=keep)
         self.error: str | None = None
         self._open = open_socket
@@ -89,7 +93,7 @@ class Pinger(threading.Thread):
         try:
             if self._sock is None:
                 self._sock = self._open()
-            rtt = echo(self._sock, self.host, self._sequence, self.interval)
+            rtt = echo(self._sock, self.host, self._sequence, self.timeout)
             self.results.append(rtt)
             self.error = None
             if rtt is None:
@@ -122,7 +126,7 @@ class Pinger(threading.Thread):
         self._halt.set()
 
     def summary(self) -> dict:
-        return ping_summary(self.host, list(self.results), self.error)
+        return ping_summary(self.host, list(self.results), self.error, self.interval)
 
 
 # --- DNS ----------------------------------------------------------------------

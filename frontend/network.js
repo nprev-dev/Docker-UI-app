@@ -12,7 +12,10 @@ import {
   formatRate,
   formatRateShort,
   formatTime,
+  niceCeil,
   setText,
+  sticks,
+  surface,
 } from "./common.js";
 
 // Lines available under each pane heading.
@@ -26,52 +29,6 @@ const LOSS_CRITICAL = 10;
 const f = Object.fromEntries(Array.from(document.getElementById("network").querySelectorAll("[data-f]"), (node) => [node.dataset.f, node]));
 
 const dash = (value, format = String) => (value == null ? "-" : format(value));
-
-// --- Stick graphs ------------------------------------------------------------
-
-// Round a maximum up to 1, 2 or 5 times a power of ten, so the scale reads cleanly and does not twitch.
-function niceCeil(value) {
-  const power = 10 ** Math.floor(Math.log10(value));
-  const lead = value / power;
-  return (lead <= 1 ? 1 : lead <= 2 ? 2 : lead <= 5 ? 5 : 10) * power;
-}
-
-function surface(canvas) {
-  const ratio = window.devicePixelRatio || 1;
-  const width = Math.round(canvas.clientWidth * ratio);
-  const height = Math.round(canvas.clientHeight * ratio);
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  const context = canvas.getContext("2d");
-  context.clearRect(0, 0, width, height);
-  // Two sticks per character cell: thin vertical strokes, like the | of the meters stood on end.
-  const pitch = Math.max(2, Math.round((cellWidth() * ratio) / 2));
-  const style = getComputedStyle(canvas);
-  return {
-    context,
-    width,
-    height,
-    ratio,
-    pitch,
-    stroke: Math.max(1, Math.floor(pitch / 4)),
-    slots: Math.floor(width / pitch),
-    colour: (name) => style.getPropertyValue(name).trim(),
-  };
-}
-
-// Draws one stick per value, newest at the right edge. `shares` are 0..1 of `room`.
-function sticks(s, shares, colour, base, room, upward) {
-  s.context.fillStyle = colour;
-  const first = s.width - shares.length * s.pitch + Math.floor((s.pitch - s.stroke) / 2);
-  shares.forEach((share, index) => {
-    if (!(share > 0)) return;
-    // Any traffic at all shows at least one pixel.
-    const length = Math.max(1, Math.round(Math.min(1, share) * room));
-    s.context.fillRect(first + index * s.pitch, upward ? base - length : base, s.stroke, length);
-  });
-}
 
 // --- Throughput --------------------------------------------------------------
 
@@ -190,7 +147,7 @@ function buildPing(role) {
   const spark = element("p", "line spark");
   spark.append(canvas, peak);
   f.pings.append(line, spark);
-  return { role, text, loss, canvas, peak, history: [] };
+  return { role, text, loss, canvas, peak, history: [], interval: 1 };
 }
 
 const pings = { gateway: buildPing("gateway"), internet: buildPing("internet") };
@@ -212,11 +169,14 @@ function drawSpark(ping) {
   draw((value) => (value != null && value > scale ? 1 : 0), "--bright");
   // A lost ping is a full-height stick in the alarm colour.
   draw((value) => (value == null ? 1 : 0), "--crit");
-  setText(ping.peak, answered.length ? ` max ${formatMs(Math.max(...answered))}` : "");
+  // The two targets are pinged at very different rates, so say how much time each graph spans.
+  const span = formatDuration(shown.length * ping.interval).padStart(3);
+  setText(ping.peak, answered.length ? ` ${span} max ${formatMs(Math.max(...answered))}` : "");
 }
 
 function renderPing(ping, data) {
   ping.history = data?.history ?? [];
+  ping.interval = data?.interval ?? 1;
   const label = ping.role.padEnd(9);
   if (!data) {
     setText(ping.text, `${label}-`);
@@ -226,7 +186,8 @@ function renderPing(ping, data) {
     setText(ping.text, `${label}${data.host.padEnd(15)} ${dash(data.last, formatMs).padStart(9)} `);
     setText(ping.loss, data.loss == null ? "" : `${data.loss >= 99.95 ? "100" : data.loss.toFixed(1)}%`.padStart(6));
     ping.loss.dataset.tone = data.loss >= LOSS_CRITICAL ? "crit" : data.loss >= LOSS_WARNING ? "warn" : "";
-    ping.text.parentNode.title = data.error ?? "";
+    const cadence = `pinged every ${formatDuration(ping.interval)}, loss over the last ${formatDuration(ping.history.length * ping.interval)}`;
+    ping.text.parentNode.title = [cadence, data.error].filter(Boolean).join(" -- ");
   }
   drawSpark(ping);
 }

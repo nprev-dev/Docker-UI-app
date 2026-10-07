@@ -178,8 +178,15 @@ p {
 
 .panes {
   display: grid;
-  /* Each width is the widest line of that pane plus a two-column gap. Listening takes what is left. */
+}
+
+/* Each width is the widest line of that pane plus a two-column gap; one pane per frame takes what is left. */
+#network .panes {
   grid-template-columns: 57ch 30ch 43ch minmax(0, 1fr) 33ch;
+}
+
+#hardware .panes {
+  grid-template-columns: minmax(0, 1fr) 38ch 31ch 31ch 30ch;
 }
 
 .pane {

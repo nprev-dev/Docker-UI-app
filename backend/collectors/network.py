@@ -25,6 +25,8 @@ EPHEMERAL_FROM = 32768
 # How often to ask which process owns each listening port; that lookup is the slow one.
 NAMES_EVERY = 30
 SAVE_EVERY = 60
+# The gateway is our own router one hop away, so it can be pinged every second for a live reading.
+GATEWAY_PING_EVERY = 1.0
 
 SCOPE_ORDER = {"*": 0, "lan": 1, "ts": 2, "lo": 3}
 TAILSCALE = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
@@ -416,6 +418,7 @@ class NetworkCollector:
         *,
         iface: str | None = None,
         ping_target: str = "1.1.1.1",
+        ping_interval: float = 30.0,
         dns_name: str = "example.com",
         speedtest_hours: float = 6.0,
         probes_enabled: bool = True,
@@ -429,6 +432,8 @@ class NetworkCollector:
         self._state = state
         self._forced_iface = iface
         self._ping_target = ping_target
+        # The internet target is somebody else's server: ask it rarely.
+        self._ping_interval = max(1.0, ping_interval)
         self._dns_name = dns_name
         self._speedtest_hours = speedtest_hours
         self._probes_enabled = probes_enabled
@@ -532,8 +537,8 @@ class NetworkCollector:
             self._speed = probes.SpeedTester(self._state, self._speedtest_hours)
             for thread in (self._dns, self._wan, self._speed):
                 thread.start()
-        self._point_pinger("gateway", gateway)
-        self._point_pinger("internet", self._ping_target)
+        self._point_pinger("gateway", gateway, GATEWAY_PING_EVERY)
+        self._point_pinger("internet", self._ping_target, self._ping_interval)
 
         dns = self._dns.value or {}
         wan = self._wan.value or self._state.get("wan") or {}
@@ -557,7 +562,7 @@ class NetworkCollector:
             "speedtest": self._speed.summary(),
         }
 
-    def _point_pinger(self, role: str, host: str | None) -> None:
+    def _point_pinger(self, role: str, host: str | None, interval: float) -> None:
         current = self._pingers.get(role)
         if current and current.host == host:
             return
@@ -566,7 +571,7 @@ class NetworkCollector:
             current.stop()
             del self._pingers[role]
         if host:
-            self._pingers[role] = probes.Pinger(host)
+            self._pingers[role] = probes.Pinger(host, interval=interval)
             self._pingers[role].start()
 
     def _time_dns(self) -> dict:
