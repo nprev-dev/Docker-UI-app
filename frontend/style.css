@@ -312,7 +312,8 @@ p {
   background: rgba(2, 3, 10, 0.82);
   overflow: hidden;
   white-space: nowrap;
-  transition: top 600ms;
+  /* Its visibility is faded by the script, frame by frame, in step with its leader line. */
+  transition: top 600ms, border-color 600ms;
 }
 
 .callout b {
@@ -322,6 +323,7 @@ p {
   font: 600 0.9rem / var(--line) var(--sans);
   letter-spacing: 0.04em;
   text-overflow: ellipsis;
+  transition: color 600ms;
 }
 
 .callout span {

@@ -1,29 +1,40 @@
 // Centrepiece: the server as a glowing core, with a field line to everything it talks to.
 // Containers sit on the left, network peers on the right. A brighter, thicker bundle of lines means
 // more traffic (on a log scale); the dashes on a line move the way the data moves.
+// What is drawn is always the scene's present state, which glides (see scene.js): nothing in here
+// may switch on a threshold, or the picture would jump when data arrives.
 
 import { calm, cellWidth, element, formatRate, formatRateShort, setText } from "./common.js";
+import { Scene } from "./scene.js";
 
-// Frames per second: the motion is slow, so there is no point drawing faster. If one frame costs
-// more than the budget (a browser drawing without the graphics card), the rate is halved.
-const FRAME_MS = 1000 / 24;
-const SLOW_FRAME_MS = 1000 / 12;
-const FRAME_BUDGET_MS = 10;
+// Frames per second, best first. The picture starts at the top rate and steps down when one frame
+// costs more than a third of the time between frames (a browser drawing without the graphics card),
+// then back up once a frame would cost under a quarter of it.
+const RATES = [60, 30, 20];
+// A frame is drawn once this share of the wait has passed. The screen's own rhythm then sets the
+// pace, and frames come evenly spaced instead of now early, now late.
+const EARLY = 0.7;
 // Browsers queue drawing and finish it later, so timing a frame means forcing it to finish.
-// That is done on one frame in this many, to keep the check itself cheap.
-const TIMED_FRAME_EVERY = 120;
+// That is done this often, to keep the check itself cheap.
+const TIMED_FRAME_MS = 4000;
 // Strands in a bundle: a live thing always has the first few, traffic adds the rest.
 const IDLE_STRANDS = 2;
 const EXTRA_STRANDS = 3;
 // Only the first strands of a bundle carry moving dashes; more adds cost, not information.
 const DASHED_STRANDS = 3;
+const DASH = [9, 60];
+// Dashes fade away as traffic falls to nothing; this is the level at which they are fully there.
+const DASH_FULL_AT = 0.1;
 // Labels per side. More things than that are still drawn, just not named.
 const SLOTS = 5;
 const CALLOUT_COLUMNS = 22;
-// Labels are handed out again at most this often, so they do not shuffle with every burst of traffic.
+// Labels are handed out again this often, so they do not shuffle with every burst of traffic.
+// Only trouble, or a labelled thing going away, gets them handed out at once.
 const RELABEL_MS = 5000;
-const FADE_MS = 700;
-const SETTLE_MS = 350;
+const LABEL_FADE_MS = 300;
+// Too faint to see: not worth drawing.
+const FAINT = 0.004;
+const SIDES = ["left", "right"];
 
 const canvas = document.getElementById("hero-canvas");
 const calloutLayer = document.getElementById("hero-callouts");
@@ -31,18 +42,15 @@ const meta = document.getElementById("hero-meta");
 const nameLabel = document.getElementById("hero-name");
 const context = canvas.getContext("2d");
 
-const nodes = new Map();
-let load = 0;
-let spin = 0;
+const scene = new Scene();
 let lastDraw = 0;
 let lastLabelled = 0;
 let labelsStale = true;
+let trouble = "";
 let colours = null;
+let pace = 0;
 let frameCost = 0;
-let frameCount = 0;
-
-// 1 Kbps and below is silence, 1 Gbps is full brightness.
-const intensity = (bitsPerSecond) => (bitsPerSecond <= 1000 ? 0 : Math.min(1, Math.log10(bitsPerSecond / 1000) / 6));
+let lastTimed = 0;
 
 // Private, link-local and Tailscale addresses: things on our own networks sit closer in.
 const isLocal = (host) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.|f[cde])/i.test(host);
@@ -52,11 +60,13 @@ const isLocal = (host) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4
 function buildCallout(side) {
   const box = element("div", "callout");
   box.style[side] = "0";
+  box.style.opacity = "0";
   box.hidden = true;
   const title = box.appendChild(element("b"));
   const detail = box.appendChild(element("span"));
   calloutLayer.append(box);
-  return { box, title, detail, node: null, y: 0 };
+  // `node` is what the box names now, `next` what it should name; `alpha` is how visible it is.
+  return { box, title, detail, node: null, next: null, alpha: 0, painted: "0", y: 0 };
 }
 
 const callouts = {
@@ -64,7 +74,15 @@ const callouts = {
   right: Array.from({ length: SLOTS }, () => buildCallout("right")),
 };
 
-// --- Turning a snapshot into nodes ---------------------------------------------------
+function writeCallout(callout) {
+  if (!callout.node) return;
+  setText(callout.title, callout.node.label);
+  setText(callout.detail, callout.node.detail);
+  callout.box.dataset.tone = callout.node.tone;
+  callout.box.title = `${callout.node.label}  ${callout.node.detail}`;
+}
+
+// --- Turning a snapshot into the things to show --------------------------------------
 
 function describe(snapshot) {
   const wanted = [];
@@ -80,14 +98,15 @@ function describe(snapshot) {
     wanted.push({
       id: `c:${item.id}`,
       side: "left",
-      ring: running ? 0.9 : 0.62,
+      orbit: running ? 0.9 : 0.62,
       label: item.name,
       detail: running ? [formatRate(rx + tx), cpu].filter(Boolean).join("  ") : item.status || item.state,
-      rate: running ? rx + tx : 0,
-      inbound: rx >= tx,
+      rx: running ? rx : 0,
+      tx: running ? tx : 0,
       tone,
       order: `${running ? 0 : 1}${item.name}`,
       pinned: false,
+      lingers: false,
     });
   }
 
@@ -117,111 +136,130 @@ function describe(snapshot) {
     wanted.push({
       id: `p:${entry.host}`,
       side: "right",
-      ring: isLocal(entry.host) ? 0.78 : 1,
+      orbit: isLocal(entry.host) ? 0.78 : 1,
       label: entry.label,
       detail: parts.join("  "),
-      rate: entry.rx + entry.tx,
-      inbound: entry.rx >= entry.tx,
+      rx: entry.rx,
+      tx: entry.tx,
       tone: silent ? "crit" : "",
       order: `${entry.pinned ? 0 : 1}${entry.host}`,
       pinned: entry.pinned,
+      lingers: true,
     });
   }
   return wanted;
 }
 
-// Spreads the nodes of one side over an arc, top to bottom in a stable order.
-function arrange(side, list) {
-  list.sort((a, b) => a.order.localeCompare(b.order));
-  const step = list.length > 1 ? Math.min(0.5, 2.5 / (list.length - 1)) : 0;
-  list.forEach((node, index) => {
-    const offset = (index - (list.length - 1) / 2) * step;
-    // Angles are measured the canvas way, clockwise from the right. Negative offsets are towards the top.
-    node.target = side === "left" ? Math.PI - offset : offset;
-  });
-}
-
 export function renderHero(snapshot) {
-  load = (snapshot.hardware?.power?.cpu_load ?? 0) / 100;
   setText(nameLabel, snapshot.host ?? "");
+  scene.update(describe(snapshot), (snapshot.hardware?.power?.cpu_load ?? 0) / 100, performance.now());
 
-  const wanted = describe(snapshot);
-  const seen = new Set();
-  for (const fresh of wanted) {
-    seen.add(fresh.id);
-    const node = nodes.get(fresh.id);
-    if (node) {
-      if (node.tone !== fresh.tone) labelsStale = true;
-      Object.assign(node, fresh, { wanted: true });
-    } else {
-      nodes.set(fresh.id, { ...fresh, wanted: true, alpha: 0, angle: null, target: 0, x: 0, y: 0 });
-      labelsStale = true;
-    }
-  }
-  for (const node of nodes.values()) {
-    if (!seen.has(node.id) && node.wanted) {
-      node.wanted = false;
-      labelsStale = true;
-    }
-  }
-  for (const side of ["left", "right"]) {
-    arrange(side, Array.from(nodes.values()).filter((node) => node.side === side && node.wanted));
-  }
-
-  const live = Array.from(nodes.values()).filter((node) => node.wanted);
+  const live = Array.from(scene.nodes.values()).filter((node) => node.wanted);
   const running = live.filter((node) => node.side === "left" && node.tone !== "off").length;
   const peers = live.filter((node) => node.side === "right").length;
   setText(meta, `${running} container${running === 1 ? "" : "s"} up   ${peers} peer${peers === 1 ? "" : "s"}`);
 
-  for (const side of ["left", "right"]) {
+  // Trouble starting or ending anywhere, or a labelled thing going away, cannot wait for the next round of labels.
+  const troubled = live.filter((node) => node.tone === "warn" || node.tone === "crit").map((node) => node.id + node.tone).join();
+  if (troubled !== trouble) labelsStale = true;
+  trouble = troubled;
+  for (const side of SIDES) {
     for (const callout of callouts[side]) {
-      if (!callout.node) continue;
-      setText(callout.title, callout.node.label);
-      setText(callout.detail, callout.node.detail);
-      callout.box.dataset.tone = callout.node.tone;
-      callout.box.title = `${callout.node.label}  ${callout.node.detail}`;
+      if (callout.next && !callout.next.wanted) labelsStale = true;
+      writeCallout(callout);
     }
   }
 }
 
-// Decides which nodes get a label box, and which box, keeping the leader lines from crossing.
-function assignCallouts(geometry) {
-  for (const side of ["left", "right"]) {
-    const candidates = Array.from(nodes.values()).filter((node) => node.side === side && node.wanted);
-    // Trouble first, then the fixed points (gateway, internet), then whoever is busiest.
-    const rank = (node) => (node.tone === "crit" ? 3e12 : node.tone === "warn" ? 2e12 : node.pinned ? 1e12 : 0) + node.rate;
-    const chosen = candidates.sort((a, b) => rank(b) - rank(a)).slice(0, SLOTS);
-    chosen.sort((a, b) => a.y - b.y);
-
+// Decides which things get a label box, and which box, keeping the leader lines from crossing.
+function assignCallouts(g) {
+  for (const side of SIDES) {
     const slots = callouts[side];
+    const labelled = new Set(slots.map((callout) => callout.next));
+    const candidates = Array.from(scene.nodes.values()).filter((node) => node.side === side && node.wanted);
+    // Trouble first, then the fixed points (gateway, internet), then whoever has been busiest lately.
+    // Whoever has a label already counts double, so two near-equals do not keep taking it from each other.
+    const rank = (node) =>
+      (node.tone === "crit" ? 3e12 : node.tone === "warn" ? 2e12 : node.pinned ? 1e12 : 0) + node.busy * (labelled.has(node) ? 2 : 1);
+    const chosen = candidates.sort((a, b) => rank(b) - rank(a)).slice(0, SLOTS);
+    // Where each one will come to rest, not where it happens to be while still on the move.
+    const rest = (node) => g.cy + Math.sin(node.goal.angle) * g.fieldY * node.goal.ring;
+    chosen.sort((a, b) => rest(a) - rest(b));
+
     const used = new Array(SLOTS).fill(null);
     let previous = -1;
     chosen.forEach((node, index) => {
-      // The slot level with the node if it is free, otherwise the next one down, never out of order.
-      const ideal = Math.round((node.y - geometry.slotTop) / geometry.slotPitch - 0.5);
+      // The slot level with the thing if it is free, otherwise the next one down, never out of order.
+      const ideal = Math.round((rest(node) - g.slotTop) / g.slotPitch - 0.5);
       const slot = Math.max(previous + 1, Math.min(SLOTS - (chosen.length - index), Math.max(index, ideal)));
       used[slot] = node;
       previous = slot;
     });
     slots.forEach((callout, slot) => {
-      callout.node = used[slot];
-      callout.box.hidden = !used[slot];
-      if (!used[slot]) return;
-      callout.y = geometry.slotTop + geometry.slotPitch * (slot + 0.5);
-      callout.box.style.top = `${(callout.y - geometry.calloutHeight / 2) / geometry.ratio}px`;
-      setText(callout.title, used[slot].label);
-      setText(callout.detail, used[slot].detail);
-      callout.box.dataset.tone = used[slot].tone;
+      callout.next = used[slot];
+      callout.y = g.slotTop + g.slotPitch * (slot + 0.5);
+      callout.box.style.top = `${(callout.y - g.calloutHeight / 2) / g.ratio}px`;
     });
+  }
+}
+
+// A label never changes hands in view: the box fades out, is rewritten, and fades back in.
+function fadeCallouts(elapsed) {
+  const step = calm ? 1 : elapsed / LABEL_FADE_MS;
+  for (const side of SIDES) {
+    for (const callout of callouts[side]) {
+      if (callout.node !== callout.next) {
+        callout.alpha = Math.max(0, callout.alpha - step);
+        if (callout.alpha === 0) {
+          callout.node = callout.next;
+          writeCallout(callout);
+          // With less motion there is one picture a second: the new name must be in this one, not the next.
+          if (calm && callout.node) callout.alpha = 1;
+        }
+      } else if (callout.node) {
+        callout.alpha = Math.min(1, callout.alpha + step);
+      }
+      const opacity = callout.alpha.toFixed(2);
+      if (opacity !== callout.painted) {
+        callout.painted = opacity;
+        callout.box.style.opacity = opacity;
+      }
+      callout.box.hidden = !callout.node;
+    }
   }
 }
 
 // --- Drawing ---------------------------------------------------------------------------
 
+// Any solid CSS colour as red, green and blue: the canvas is asked what it makes of it.
+function shade(css) {
+  context.fillStyle = css;
+  const hex = context.fillStyle;
+  return { css, rgb: [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)) };
+}
+
 function readColours() {
   const style = getComputedStyle(canvas);
   const read = (name) => style.getPropertyValue(name).trim();
-  return { bg: read("--bg"), blue: read("--blue"), ink: read("--ink"), warn: read("--warn"), crit: read("--crit"), rule: read("--rule"), leader: read("--rule-bright") };
+  return {
+    bg: read("--bg"),
+    rule: read("--rule"),
+    leader: read("--rule-bright"),
+    blue: shade(read("--blue")),
+    ink: shade(read("--ink")),
+    warn: shade(read("--warn")),
+    crit: shade(read("--crit")),
+  };
+}
+
+// A thing's colour: its usual one, turned towards amber or red as far as its alarm has come on.
+function tint(usual, node) {
+  if (node.warn < FAINT && node.crit < FAINT) return usual.css;
+  const mixed = usual.rgb.map((channel, index) => {
+    const warned = channel + (colours.warn.rgb[index] - channel) * node.warn;
+    return Math.round(warned + (colours.crit.rgb[index] - warned) * node.crit);
+  });
+  return `rgb(${mixed})`;
 }
 
 function measure() {
@@ -256,8 +294,8 @@ function measure() {
   };
 }
 
-// The curve of one strand. Strands fan out from the first: 0, +1, -1, +2, -2.
-function strandPath(g, node, index, path) {
+// Adds the curve of one strand to the path being built. Strands fan out from the first: 0, +1, -1, +2, -2.
+function strand(g, node, index) {
   const offset = Math.ceil(index / 2) * (index % 2 ? 1 : -1);
   const direction = Math.atan2(node.y - g.cy, node.x - g.cx);
   const sx = g.cx + Math.cos(direction + offset * 0.3) * g.core;
@@ -266,55 +304,73 @@ function strandPath(g, node, index, path) {
   const dy = node.y - sy;
   const length = Math.hypot(dx, dy) || 1;
   const bulge = offset * 0.2 * length;
-  path.moveTo(sx, sy);
-  path.quadraticCurveTo((sx + node.x) / 2 - (dy / length) * bulge, (sy + node.y) / 2 + (dx / length) * bulge, node.x, node.y);
+  context.moveTo(sx, sy);
+  context.quadraticCurveTo((sx + node.x) / 2 - (dy / length) * bulge, (sy + node.y) / 2 + (dx / length) * bulge, node.x, node.y);
 }
 
-function drawBundle(g, node, now) {
-  const level = intensity(node.rate);
-  const count = node.tone === "off" ? 1 : IDLE_STRANDS + Math.round(level * EXTRA_STRANDS);
-  const alpha = node.alpha * (node.tone === "off" ? 0.12 : 0.22 + 0.6 * level);
-
-  // All strands of one bundle are stroked together: far cheaper than one stroke each.
-  const bundle = new Path2D();
-  for (let index = 0; index < count; index += 1) strandPath(g, node, index, bundle);
-  context.strokeStyle = node.tone === "crit" ? colours.crit : node.tone === "warn" ? colours.warn : colours.blue;
-  context.setLineDash([]);
-  // A wide faint stroke under a thin bright one reads as glow, and costs far less than a blur.
+// A wide faint stroke under a thin bright one reads as glow, and costs far less than a blur.
+function strokeGlowing(g, alpha) {
   context.globalAlpha = alpha * 0.2;
   context.lineWidth = 4 * g.ratio;
-  context.stroke(bundle);
+  context.stroke();
   context.globalAlpha = alpha * 0.8;
   context.lineWidth = 1.1 * g.ratio;
-  context.stroke(bundle);
+  context.stroke();
+}
 
-  if (level <= 0) return;
-  context.strokeStyle = colours.ink;
-  context.globalAlpha = node.alpha * (0.5 + 0.5 * level);
+function drawBundle(g, node) {
+  // Anything that is up keeps a thin bundle even when silent; traffic thickens and brightens it.
+  // The number of strands is not whole: the outermost one is drawn as faint as it is partial,
+  // so a strand grows in and out instead of appearing.
+  const strands = 1 + node.live * (IDLE_STRANDS - 1 + node.level * EXTRA_STRANDS);
+  const alpha = node.alpha * (0.12 + node.live * (0.1 + 0.6 * node.level));
+  if (alpha < FAINT) return;
+  const whole = Math.floor(strands);
+  const part = strands - whole;
+
+  context.strokeStyle = tint(colours.blue, node);
+  context.setLineDash([]);
+  // All whole strands of one bundle are stroked together: far cheaper than one stroke each.
+  context.beginPath();
+  for (let index = 0; index < whole; index += 1) strand(g, node, index);
+  strokeGlowing(g, alpha);
+  if (alpha * part >= FAINT) {
+    context.beginPath();
+    strand(g, node, whole);
+    strokeGlowing(g, alpha * part);
+  }
+
+  const flowing = node.alpha * node.live * Math.min(1, node.level / DASH_FULL_AT) * (0.5 + 0.5 * node.level);
+  if (flowing < FAINT) return;
+  context.strokeStyle = colours.ink.css;
   context.lineWidth = 1.6 * g.ratio;
-  context.setLineDash([9 * g.ratio, 60 * g.ratio]);
-  for (let index = 0; index < Math.min(count, DASHED_STRANDS); index += 1) {
-    const dashes = new Path2D();
-    strandPath(g, node, index, dashes);
-    const travelled = now * (0.02 + 0.07 * level) * g.ratio + index * 23;
-    // The path runs outwards from the core, so a growing offset pulls the dashes inwards.
-    context.lineDashOffset = node.inbound ? travelled : -travelled;
-    context.stroke(dashes);
+  context.setLineDash(DASH.map((length) => length * g.ratio));
+  // The path runs outwards from the core, so a growing offset pulls the dashes inwards.
+  // Only the place within one repeat of the pattern matters, which keeps the number small and exact.
+  const travelled = node.travel % (DASH[0] + DASH[1]);
+  for (let index = 0; index < Math.min(Math.ceil(strands), DASHED_STRANDS); index += 1) {
+    const alpha = flowing * Math.min(1, strands - index);
+    if (alpha < FAINT) continue;
+    context.globalAlpha = alpha;
+    context.lineDashOffset = (travelled + index * 23) * g.ratio;
+    context.beginPath();
+    strand(g, node, index);
+    context.stroke();
   }
   context.setLineDash([]);
 }
 
 // A dipole-like halo around the core. It carries no network data: its brightness is processor load.
 function drawHalo(g, now) {
-  context.strokeStyle = colours.blue;
+  context.strokeStyle = colours.blue.css;
   context.lineWidth = g.ratio;
   const reach = Math.min(g.width / 2 - g.line, g.fieldX * 1.7);
   for (let k = 1; k <= 7; k += 1) {
     // Each loop leaves near one pole and returns near the other, wider and taller than the last.
-    const breathe = 1 + 0.03 * Math.sin(now / 1700 + k);
+    const breathe = calm ? 1 : 1 + 0.03 * Math.sin(now / 1700 + k);
     const wide = Math.min(reach, g.core * (1.1 + 0.75 * k)) * breathe;
     const tall = g.core * (0.9 + 0.5 * k) * breathe;
-    context.globalAlpha = (0.05 + 0.3 * load) * (1 - k / 10);
+    context.globalAlpha = (0.05 + 0.3 * scene.load) * (1 - k / 10);
     for (const side of [-1, 1]) {
       context.beginPath();
       context.moveTo(g.cx + side * g.core * 0.25, g.cy - g.core * 0.96);
@@ -326,9 +382,9 @@ function drawHalo(g, now) {
 
 function drawCore(g) {
   const glow = context.createRadialGradient(g.cx, g.cy, g.core * 0.7, g.cx, g.cy, g.core * 2.8);
-  glow.addColorStop(0, colours.blue);
+  glow.addColorStop(0, colours.blue.css);
   glow.addColorStop(1, "transparent");
-  context.globalAlpha = 0.18 + 0.4 * load;
+  context.globalAlpha = 0.18 + 0.4 * scene.load;
   context.fillStyle = glow;
   context.fillRect(g.cx - g.core * 3, g.cy - g.core * 3, g.core * 6, g.core * 6);
 
@@ -341,11 +397,11 @@ function drawCore(g) {
   context.fill();
 
   context.globalCompositeOperation = "lighter";
-  context.strokeStyle = colours.blue;
+  context.strokeStyle = colours.blue.css;
   context.lineWidth = g.ratio;
   // Meridians of a turning globe: ellipses whose width swings with the rotation.
   for (let k = 0; k < 6; k += 1) {
-    const phase = spin + (k * Math.PI) / 6;
+    const phase = scene.spin + (k * Math.PI) / 6;
     context.globalAlpha = 0.2 + 0.5 * Math.abs(Math.sin(phase));
     context.beginPath();
     context.ellipse(g.cx, g.cy, Math.max(0.5, g.core * Math.abs(Math.cos(phase))), g.core, 0, 0, Math.PI * 2);
@@ -359,13 +415,47 @@ function drawCore(g) {
     context.ellipse(g.cx, g.cy + g.core * Math.sin(latitude) * 0.94, radius, radius * 0.34, 0, 0, Math.PI * 2);
     context.stroke();
   }
-  context.strokeStyle = colours.ink;
+  context.strokeStyle = colours.ink.css;
   for (const [width, alpha] of [[5, 0.12], [2.5, 0.3], [1.2, 0.9]]) {
-    context.globalAlpha = alpha * (0.6 + 0.4 * load);
+    context.globalAlpha = alpha * (0.6 + 0.4 * scene.load);
     context.lineWidth = width * g.ratio;
     context.beginPath();
     context.arc(g.cx, g.cy, g.core, 0, Math.PI * 2);
     context.stroke();
+  }
+}
+
+function drawEndpoints(g) {
+  for (const node of scene.nodes.values()) {
+    // A soft halo under each live endpoint.
+    const alpha = node.alpha * node.live * (0.12 + 0.2 * node.level);
+    if (alpha < FAINT) continue;
+    context.globalAlpha = alpha;
+    context.fillStyle = tint(colours.blue, node);
+    context.beginPath();
+    context.arc(node.x, node.y, (9 + 8 * node.level) * g.ratio, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.globalCompositeOperation = "source-over";
+  context.lineWidth = g.ratio;
+  for (const node of scene.nodes.values()) {
+    context.beginPath();
+    context.arc(node.x, node.y, (3 + 2.5 * node.level) * g.ratio, 0, Math.PI * 2);
+    if (node.live < 1 - FAINT) {
+      // Stopped: an empty ring, no light. A thing on its way between the two shows some of each.
+      context.globalAlpha = node.alpha;
+      context.fillStyle = colours.bg;
+      context.fill();
+      context.globalAlpha = node.alpha * (1 - node.live);
+      context.strokeStyle = colours.leader;
+      context.stroke();
+    }
+    if (node.live >= FAINT) {
+      context.globalAlpha = node.alpha * node.live;
+      context.fillStyle = tint(colours.ink, node);
+      context.fill();
+    }
   }
 }
 
@@ -374,6 +464,7 @@ function draw(now, elapsed) {
   colours ??= readColours();
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, g.width, g.height);
+  context.lineCap = "round";
   nameLabel.style.top = `${(g.cy + g.core + g.line * 0.4) / g.ratio}px`;
 
   // Two faint orbits show where the near and far things sit.
@@ -382,6 +473,7 @@ function draw(now, elapsed) {
   context.lineWidth = g.ratio;
   context.globalAlpha = 0.7;
   context.setLineDash([2 * g.ratio, 6 * g.ratio]);
+  context.lineDashOffset = 0;
   for (const ring of [0.78, 1]) {
     context.beginPath();
     context.ellipse(g.cx, g.cy, g.fieldX * ring, g.fieldY * ring, 0, 0, Math.PI * 2);
@@ -389,13 +481,10 @@ function draw(now, elapsed) {
   }
   context.setLineDash([]);
 
-  const settle = 1 - Math.exp(-elapsed / SETTLE_MS);
-  for (const node of nodes.values()) {
-    node.angle = node.angle == null ? node.target : node.angle + (node.target - node.angle) * settle;
-    node.alpha = Math.max(0, Math.min(1, node.alpha + ((node.wanted ? 1 : -1) * elapsed) / FADE_MS));
+  scene.step(elapsed, calm);
+  for (const node of scene.nodes.values()) {
     node.x = g.cx + Math.cos(node.angle) * g.fieldX * node.ring;
     node.y = g.cy + Math.sin(node.angle) * g.fieldY * node.ring;
-    if (!node.wanted && node.alpha === 0) nodes.delete(node.id);
   }
 
   if (labelsStale || now - lastLabelled > RELABEL_MS) {
@@ -403,14 +492,15 @@ function draw(now, elapsed) {
     lastLabelled = now;
     labelsStale = false;
   }
+  fadeCallouts(elapsed);
 
   // Leader lines sit under everything that glows.
   context.strokeStyle = colours.leader;
   context.lineWidth = g.ratio;
-  for (const side of ["left", "right"]) {
+  for (const side of SIDES) {
     for (const callout of callouts[side]) {
       if (!callout.node) continue;
-      context.globalAlpha = callout.node.alpha * 0.9;
+      context.globalAlpha = callout.alpha * callout.node.alpha * 0.9;
       context.beginPath();
       context.moveTo(side === "left" ? g.gutter : g.width - g.gutter, callout.y);
       context.lineTo(callout.node.x, callout.node.y);
@@ -419,68 +509,39 @@ function draw(now, elapsed) {
   }
 
   context.globalCompositeOperation = "lighter";
-  context.lineCap = "round";
   drawHalo(g, now);
-  // Anything that is up keeps a thin bundle even when silent; traffic thickens and brightens it.
-  for (const node of nodes.values()) drawBundle(g, node, now);
-
-  spin += elapsed * (0.00025 + 0.0012 * load);
+  for (const node of scene.nodes.values()) drawBundle(g, node);
   drawCore(g);
-
-  for (const node of nodes.values()) {
-    if (node.tone === "off") continue;
-    // A soft halo under each live endpoint.
-    const level = intensity(node.rate);
-    context.globalAlpha = node.alpha * (0.12 + 0.2 * level);
-    context.fillStyle = node.tone === "crit" ? colours.crit : node.tone === "warn" ? colours.warn : colours.blue;
-    context.beginPath();
-    context.arc(node.x, node.y, (9 + 8 * level) * g.ratio, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  context.globalCompositeOperation = "source-over";
-  for (const node of nodes.values()) {
-    const level = intensity(node.rate);
-    const radius = (3 + 2.5 * level) * g.ratio;
-    context.globalAlpha = node.alpha;
-    context.beginPath();
-    context.arc(node.x, node.y, radius, 0, Math.PI * 2);
-    if (node.tone === "off") {
-      // Stopped: an empty ring, no light.
-      context.fillStyle = colours.bg;
-      context.fill();
-      context.strokeStyle = colours.leader;
-      context.lineWidth = g.ratio;
-      context.stroke();
-    } else {
-      context.fillStyle = node.tone === "crit" ? colours.crit : node.tone === "warn" ? colours.warn : colours.ink;
-      context.fill();
-    }
-  }
+  drawEndpoints(g);
   context.globalAlpha = 1;
 }
 
 function frame(now) {
   requestAnimationFrame(frame);
-  // Someone who asked for less motion gets one frame a second: the picture stays current, nothing flows.
-  const wait = calm ? 1000 : frameCost > FRAME_BUDGET_MS ? SLOW_FRAME_MS : FRAME_MS;
+  // Someone who asked for less motion gets one still picture a second: current, but nothing flows.
+  const wait = calm ? 1000 : 1000 / RATES[pace];
   // A screen nobody can see needs no frames at all.
-  if (document.hidden || now - lastDraw < wait) return;
-  const elapsed = Math.min(200, now - lastDraw);
+  if (document.hidden || now - lastDraw < wait * EARLY) return;
+  // Real time since the last frame, however long: a screen that was hidden, or is slow to draw,
+  // catches up with the data at once instead of running behind it.
+  const elapsed = now - lastDraw;
   lastDraw = now;
-  frameCount += 1;
-  if (frameCount % TIMED_FRAME_EVERY !== 1) {
+  if (now - lastTimed < TIMED_FRAME_MS) {
     draw(now, elapsed);
     return;
   }
+  lastTimed = now;
   const started = performance.now();
   draw(now, elapsed);
   // Reading one pixel back makes the browser finish the frame, so the clock sees its real cost.
   context.getImageData(0, 0, 1, 1);
   const cost = performance.now() - started;
-  frameCost = frameCost ? frameCost + (cost - frameCost) * 0.3 : cost;
-  // Kept on the element, where it is easy to inspect.
+  frameCost = frameCost ? frameCost + (cost - frameCost) * 0.4 : cost;
+  if (pace < RATES.length - 1 && frameCost > 1000 / RATES[pace] / 3) pace += 1;
+  else if (pace > 0 && frameCost < 1000 / RATES[pace - 1] / 4) pace -= 1;
+  // Kept on the element, where they are easy to inspect.
   canvas.dataset.frameMs = frameCost.toFixed(1);
+  canvas.dataset.fps = String(RATES[pace]);
 }
 
 addEventListener("resize", () => {
