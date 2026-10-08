@@ -1,6 +1,7 @@
 # Rack Dashboard
 
 A one-page status screen for a home server, built to sit full screen on a small monitor in the rack. It shows the Docker containers, network, power and hardware of the machine it runs on and refreshes every second.
+No this dashboard doesn't fix anything. But clueless relatives might call you a cybercriminal from now on.
 
 ![The dashboard at 1920x1080](docs/overview.png)
 
