@@ -267,6 +267,21 @@ p {
   border-top: 1px solid var(--rule);
 }
 
+/* The centrepiece's rule runs on into the gap beside it and turns down, parting the centrepiece from
+   the sections on its right all the way to the rule of the bottom strip. */
+.hero::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1ch;
+  /* Across the gap between the middle and bottom rows (see .screen), and onto the rule below it. */
+  bottom: calc(var(--line) * -0.6 - 1px);
+  width: 1ch;
+  border-top: 1px solid var(--rule);
+  border-right: 1px solid var(--rule);
+  pointer-events: none;
+}
+
 .hero canvas {
   position: absolute;
   inset: 0;
