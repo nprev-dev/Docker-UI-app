@@ -1,6 +1,21 @@
 # Runtime state: holds this network's public IP address and traffic history.
 data/
 
+# Python
 .venv/
 __pycache__/
+*.py[cod]
 .pytest_cache/
+
+# Personal and per-machine files: assistant instructions, local settings, editor folders.
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+.mcp.json
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+*.swp
+.DS_Store

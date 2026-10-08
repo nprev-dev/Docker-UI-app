@@ -294,7 +294,8 @@ p {
 .hero-name {
   position: absolute;
   left: 0;
-  white-space: nowrap;
+  /* One line each, and the wider gaps written into the text are kept: they separate its parts. */
+  white-space: pre;
 }
 
 .hero-title {
