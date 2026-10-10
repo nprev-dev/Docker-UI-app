@@ -153,6 +153,8 @@ The checks of the animation logic are written in JavaScript and run under `gjs`,
 - No view of the switch ports.
 - It has only ever run on one machine (AMD CPU, NVIDIA GPU). Other hardware will probably leave gaps in the power, temperature and fan sections.
 
-## Fonts
+## Licence
 
-IBM Plex Sans and IBM Plex Mono are bundled under the SIL Open Font License. The licence text is in `frontend/fonts/LICENSE.txt`.
+MIT. See `LICENSE`.
+
+The bundled fonts, IBM Plex Sans and IBM Plex Mono, come under the SIL Open Font License. Its text is in `frontend/fonts/LICENSE.txt`.
