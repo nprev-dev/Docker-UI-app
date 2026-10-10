@@ -220,6 +220,37 @@ def test_ups_power_events(log):
     ]
 
 
+CARD = {"name": "NVIDIA GeForce RTX 3060", "load": 14.0, "mem_used": 1, "mem_total": 2}
+
+
+def test_graphics_card_dropping_out_and_coming_back(log):
+    log.observe(snapshot(hardware__gpu={"cards": [CARD], "error": None}))
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": "Failed to initialize NVML: Driver/library version mismatch"}))
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": "Failed to initialize NVML: Driver/library version mismatch"}))
+    log.observe(snapshot(hardware__gpu={"cards": [CARD], "error": None}))
+
+    assert said(log) == [
+        ("GPU", "crit", "card not answering: Failed to initialize NVML: Driver/library version mismatch"),
+        ("GPU", "info", "card is answering again"),
+    ]
+
+
+def test_machine_without_a_graphics_card_says_nothing(log):
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": None}))
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": None}))
+    # A snapshot from before the section existed has no entry for it at all.
+    log.observe(snapshot())
+
+    assert said(log) == []
+
+
+def test_error_that_clears_without_a_card_is_not_called_a_return(log):
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": "No devices were found"}))
+    log.observe(snapshot(hardware__gpu={"cards": [], "error": None}))
+
+    assert said(log) == [("GPU", "crit", "card not answering: No devices were found")]
+
+
 def test_sensors_and_power_becoming_available(log):
     log.observe(snapshot(hardware__board_sensors=True, hardware__power={"cpu_measured": True}))
 

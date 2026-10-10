@@ -8,11 +8,14 @@ import time
 from collections import deque
 from pathlib import Path
 from typing import Callable
+from xml.etree import ElementTree
 
 # Wall-power samples kept for the graph, and how many seconds each one covers.
 HISTORY = 120
 HISTORY_STEP = 5.0
 GPU_EVERY = 2.0
+# The list of programs on the card takes nvidia-smi five times as long as the readings, and changes rarely.
+GPU_APPS_EVERY = 10.0
 UPS_EVERY = 30.0
 INVENTORY_EVERY = 600.0
 SAVE_EVERY = 60.0
@@ -241,6 +244,35 @@ def parse_gpus(text: str) -> list[dict]:
     return gpus
 
 
+def query_gpu_apps() -> str:
+    """nvidia-smi's full report. It is the one form that lists every program on a card, desktop ones included."""
+    return subprocess.run(["nvidia-smi", "-q", "-x"], capture_output=True, text=True, timeout=5, check=True).stdout
+
+
+def parse_gpu_apps(text: str) -> dict | None:
+    """How many programs hold memory on the cards, and how much between them."""
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError:
+        return None
+    count, sizes = 0, []
+    for process in root.iter("process_info"):
+        count += 1
+        # "175 MiB", or "N/A" where the driver will not say (inside some containers).
+        size = _number(((process.findtext("used_memory") or "").split() or [None])[0])
+        if size is not None:
+            sizes.append(size)
+    return {"count": count, "mem": int(sum(sizes) * 1024 * 1024) if sizes or not count else None}
+
+
+def _failure(exc: Exception) -> str:
+    """Why nvidia-smi gave no answer, in its own words where it has any."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "nvidia-smi did not answer in time"
+    said = f"{getattr(exc, 'stdout', None) or ''}\n{getattr(exc, 'stderr', None) or ''}".strip().splitlines()
+    return said[0].strip() if said else str(exc)
+
+
 # --- sensors --------------------------------------------------------------------
 
 
@@ -436,6 +468,27 @@ class EnergyMeter:
 # --- the collector --------------------------------------------------------------
 
 
+class Trace:
+    """A graph's worth of history: one point per few seconds, the average of what was seen in them."""
+
+    def __init__(self, keep: int = HISTORY, step: float = HISTORY_STEP):
+        self._points: deque[int] = deque(maxlen=keep)
+        self._step = step
+        self._bucket: list[float] = []
+        self._bucket_from: float | None = None
+
+    def add(self, now: float, value: float) -> None:
+        if self._bucket_from is None:
+            self._bucket_from = now
+        self._bucket.append(value)
+        if now - self._bucket_from >= self._step:
+            self._points.append(round(sum(self._bucket) / len(self._bucket)))
+            self._bucket, self._bucket_from = [], now
+
+    def points(self) -> list[int]:
+        return list(self._points)
+
+
 class HardwareCollector:
     def __init__(
         self,
@@ -451,6 +504,7 @@ class HardwareCollector:
         inventory: Callable[[], dict] = read_inventory,
         cpu_power: CpuPower | None = None,
         gpus: Callable[[], str] = query_gpus,
+        gpu_apps: Callable[[], str] = query_gpu_apps,
         hwmon: Callable[[], list[dict]] = scan_hwmon,
         ups: Callable[[], dict] = read_ups,
         clock: Callable[[], float] = time.time,
@@ -464,6 +518,7 @@ class HardwareCollector:
         self._read_inventory = inventory
         self._cpu = cpu_power or CpuPower(idle_watts=cpu_idle_watts, max_watts=cpu_max_watts, monotonic=monotonic)
         self._query_gpus = gpus
+        self._query_gpu_apps = gpu_apps
         self._scan_hwmon = hwmon
         self._read_ups = ups
         self._monotonic = monotonic
@@ -473,11 +528,13 @@ class HardwareCollector:
         self._inventory_at = 0.0
         self._gpus: list[dict] = []
         self._gpus_at: float | None = None
+        self._gpu_error: str | None = None
+        self._gpu_apps: dict | None = None
+        self._gpu_apps_at: float | None = None
+        self._gpu_load = Trace()
         self._ups: dict = {"present": False}
         self._ups_at: float | None = None
-        self._history: deque[int] = deque(maxlen=HISTORY)
-        self._bucket: list[float] = []
-        self._bucket_from: float | None = None
+        self._wall = Trace()
 
     def collect(self) -> dict:
         now = self._monotonic()
@@ -485,6 +542,8 @@ class HardwareCollector:
             self._inventory, self._inventory_at = self._read_inventory(), now
         if self._gpus_at is None or now - self._gpus_at >= GPU_EVERY:
             self._gpus, self._gpus_at = self._gpu_readings(), now
+        if self._gpu_apps_at is None or now - self._gpu_apps_at >= GPU_APPS_EVERY:
+            self._gpu_apps, self._gpu_apps_at = self._gpu_programs(), now
         if self._ups_at is None or now - self._ups_at >= UPS_EVERY:
             self._ups, self._ups_at = self._read_ups(), now
 
@@ -496,6 +555,7 @@ class HardwareCollector:
             "error": None,
             "inventory": inventory,
             "power": self._power(now, gpus),
+            "gpu": self._gpu(now, gpus),
             "temps": pick_temps(chips, gpus),
             "fans": pick_fans(chips, gpus),
             "volts": pick_volts(chips),
@@ -505,11 +565,36 @@ class HardwareCollector:
         }
 
     def _gpu_readings(self) -> list[dict]:
+        self._gpu_error = None
         try:
             return parse_gpus(self._query_gpus())
-        except (OSError, subprocess.SubprocessError):
-            # No NVIDIA card or driver: the machine simply has no separate graphics power to report.
+        except FileNotFoundError:
+            # No NVIDIA tools at all: the machine simply has no card of that make to report on.
             return []
+        except (OSError, subprocess.SubprocessError) as exc:
+            # The tools are there but the card is not answering: a driver that crashed or was half updated.
+            self._gpu_error = _failure(exc)
+            return []
+
+    def _gpu_programs(self) -> dict | None:
+        if not self._gpus:
+            return None
+        try:
+            return parse_gpu_apps(self._query_gpu_apps())
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def _gpu(self, now: float, gpus: list[dict]) -> dict:
+        loads = [g["load"] for g in gpus if g["load"] is not None]
+        if loads:
+            # With several cards the graph follows whichever is working hardest.
+            self._gpu_load.add(now, max(loads))
+        return {
+            "cards": [{"name": g["name"], "load": g["load"], "mem_used": g["mem_used"], "mem_total": g["mem_total"]} for g in gpus],
+            "history": {"step": HISTORY_STEP, "load": self._gpu_load.points()},
+            "apps": self._gpu_apps if gpus else None,
+            "error": self._gpu_error,
+        }
 
     def _power(self, now: float, gpus: list[dict]) -> dict:
         cpu = self._cpu.read()
@@ -530,7 +615,7 @@ class HardwareCollector:
             "gpu_limit_w": round(sum(limits), 1) if limits else None,
             "rest_w": rest,
             "wall_w": None if wall is None else round(wall, 1),
-            "history": {"step": HISTORY_STEP, "wall": list(self._history)},
+            "history": {"step": HISTORY_STEP, "wall": self._wall.points()},
             "today": None,
             "month_kwh": None,
             "month_cost": None,
@@ -540,23 +625,14 @@ class HardwareCollector:
         if wall is None:
             return power
 
-        self._sample(now, wall)
-        power["history"]["wall"] = list(self._history)
+        self._wall.add(now, wall)
+        power["history"]["wall"] = self._wall.points()
         today = self._energy.update(wall)
         month_kwh = today["avg_w"] * HOURS_PER_MONTH / 1000
         power["today"] = today
         power["month_kwh"] = round(month_kwh, 1)
         power["month_cost"] = None if self._price is None else round(month_kwh * self._price, 2)
         return power
-
-    def _sample(self, now: float, wall: float) -> None:
-        """One graph point per few seconds, the average of what was seen in them."""
-        if self._bucket_from is None:
-            self._bucket_from = now
-        self._bucket.append(wall)
-        if now - self._bucket_from >= HISTORY_STEP:
-            self._history.append(round(sum(self._bucket) / len(self._bucket)))
-            self._bucket, self._bucket_from = [], now
 
     def close(self) -> None:
         self._energy.save()

@@ -123,7 +123,7 @@ p {
 .band-a { grid-template-columns: 53ch 27ch minmax(0, 1fr); }
 .band-b { grid-template-columns: 42ch 29ch minmax(0, 1fr); }
 .band-c { grid-template-columns: 29ch 29ch minmax(0, 1fr); }
-.band-d { grid-template-columns: 29ch minmax(0, 1fr); }
+.band-d { grid-template-columns: 29ch 44ch minmax(0, 1fr); }
 
 /* Fixed heights (a title plus the lines below it), so nothing moves when a reading goes missing. */
 .band-a { height: calc(var(--line) * 10 + 1px); }

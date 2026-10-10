@@ -101,6 +101,7 @@ export class Glide {
     this.draw = draw;
     this.current = null;
     this.target = null;
+    this.span = 0;
     draw(null);
   }
 
@@ -112,6 +113,7 @@ export class Glide {
       this.draw(null);
       return;
     }
+    const moved = value !== this.target;
     this.target = value;
     if (this.current == null) {
       // Nothing to roll from, so show the first value at once.
@@ -119,13 +121,16 @@ export class Glide {
       this.draw(value);
       return;
     }
+    // How far this roll has to go: "close enough" is judged against it, so that a roll down to
+    // zero ends as promptly as any other instead of creeping through ever smaller numbers.
+    if (moved) this.span = Math.abs(value - this.current);
     gliding.add(this);
     queueFrame();
   }
 
   step(pull) {
     const gap = this.target - this.current;
-    const arrived = pull >= 1 || Math.abs(gap) <= Math.abs(this.target) * 0.002 + 1e-6;
+    const arrived = pull >= 1 || Math.abs(gap) <= Math.max(Math.abs(this.target), this.span) * 0.002 + 1e-6;
     this.current = arrived ? this.target : this.current + gap * pull;
     this.draw(this.current);
     return arrived;

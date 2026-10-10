@@ -13,6 +13,7 @@ from backend.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
 from backend.state import StateFile
 
 GIB = 1024**3
+MIB = 1024**2
 
 
 @pytest.fixture
@@ -552,6 +553,25 @@ INVENTORY = {
 GPU_LINE = "NVIDIA GeForce RTX 3060, 12288, 911, 14, 46, 0, 40.0, 170.00\n"
 
 
+def app(pid, kind, name, memory):
+    return (f"<process_info><gpu_instance_id>N/A</gpu_instance_id><compute_instance_id>N/A</compute_instance_id><pid>{pid}</pid>"
+            f"<type>{kind}</type><process_name>{name}</process_name><used_memory>{memory}</used_memory></process_info>")
+
+
+def report(*cards):
+    """nvidia-smi -q -x, cut down to the parts that are read. Each card is a list of programs."""
+    body = "".join(f'<gpu id="00000000:0{n}:00.0"><product_name>RTX</product_name><processes>{"".join(apps)}</processes></gpu>' for n, apps in enumerate(cards))
+    return f'<?xml version="1.0" ?>\n<!DOCTYPE nvidia_smi_log SYSTEM "nvsmi_device_v12.dtd">\n<nvidia_smi_log><driver_version>595.99.02</driver_version>{body}</nvidia_smi_log>'
+
+
+# As seen on the development machine: a desktop session and nothing else on the card.
+APPS = report([
+    app(8389, "G", "/usr/bin/gnome-shell", "175 MiB"), app(11857, "G", "/usr/bin/gnome-shell", "117 MiB"),
+    app(12214, "C+G", "/usr/libexec/gnome-remote-desktop-daem", "185 MiB"), app(13377, "C+G", "/usr/bin/nautilus", "20 MiB"),
+    app(14178, "G", "/usr/bin/Xwayland", "2 MiB"),
+])
+
+
 class FakeCpu:
     def __init__(self, watts=27.0, measured=False):
         self.watts, self.measured = watts, measured
@@ -568,7 +588,9 @@ class Rig:
         self.cpu = FakeCpu()
         self.gpu_text = GPU_LINE
         self.gpu_error = None
-        self.calls = {"inventory": 0, "gpus": 0, "ups": 0}
+        self.apps_text = APPS
+        self.apps_error = None
+        self.calls = {"inventory": 0, "gpus": 0, "apps": 0, "ups": 0}
 
     def build(self, **over):
         def inventory():
@@ -581,11 +603,17 @@ class Rig:
                 raise self.gpu_error
             return self.gpu_text
 
+        def apps():
+            self.calls["apps"] += 1
+            if self.apps_error:
+                raise self.apps_error
+            return self.apps_text
+
         def ups():
             self.calls["ups"] += 1
             return {"present": False}
 
-        settings = dict(inventory=inventory, cpu_power=self.cpu, gpus=gpus, hwmon=lambda: [], ups=ups, clock=self.wall, monotonic=self.mono)
+        settings = dict(inventory=inventory, cpu_power=self.cpu, gpus=gpus, gpu_apps=apps, hwmon=lambda: [], ups=ups, clock=self.wall, monotonic=self.mono)
         return HardwareCollector(self.state, **{**settings, **over})
 
     def tick(self, seconds=1.0):
@@ -683,6 +711,7 @@ def test_slow_things_are_not_asked_every_second(rig):
 
     assert rig.calls["inventory"] == 1
     assert rig.calls["gpus"] == 16
+    assert rig.calls["apps"] == 4
     assert rig.calls["ups"] == 2
 
 
@@ -711,3 +740,196 @@ def test_result_is_plain_json_and_energy_survives_close(rig, tmp_path):
     json.dumps(result, allow_nan=False)
     collector.close()
     assert json.loads((tmp_path / "state.json").read_text())["energy"]["counted"] == 10
+
+
+# --- graphics card section ---------------------------------------------------------
+
+
+def test_programs_on_the_card_are_counted():
+    assert mod.parse_gpu_apps(APPS) == {"count": 5, "mem": (175 + 117 + 185 + 20 + 2) * MIB}
+
+
+def test_programs_on_several_cards_are_added_up():
+    text = report([app(1, "C", "python3", "9000 MiB")], [], [app(2, "G", "Xorg", "30 MiB"), app(3, "C", "python3", "70 MiB")])
+
+    assert mod.parse_gpu_apps(text) == {"count": 3, "mem": 9100 * MIB}
+
+
+def test_an_empty_card_has_no_programs():
+    assert mod.parse_gpu_apps(report([])) == {"count": 0, "mem": 0}
+    # Older drivers write the word instead of leaving the list empty.
+    assert mod.parse_gpu_apps(report(["None"])) == {"count": 0, "mem": 0}
+
+
+def test_memory_the_driver_will_not_tell():
+    # Inside a container the driver lists programs without their sizes.
+    assert mod.parse_gpu_apps(report([app(1, "C", "python3", "N/A")])) == {"count": 1, "mem": None}
+    assert mod.parse_gpu_apps(report([app(1, "C", "python3", "N/A"), app(2, "G", "Xorg", "64 MiB")])) == {"count": 2, "mem": 64 * MIB}
+    assert mod.parse_gpu_apps(report([app(1, "C", "python3", "")])) == {"count": 1, "mem": None}
+
+
+@pytest.mark.parametrize("text", ["", "not xml at all", "<nvidia_smi_log><gpu>", "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."])
+def test_unreadable_program_report(text):
+    assert mod.parse_gpu_apps(text) is None
+
+
+def test_a_report_without_cards():
+    assert mod.parse_gpu_apps("<nvidia_smi_log><attached_gpus>0</attached_gpus></nvidia_smi_log>") == {"count": 0, "mem": 0}
+
+
+def test_trace_averages_each_step_and_forgets_the_oldest():
+    trace = mod.Trace(keep=3, step=5.0)
+    for second, value in enumerate([10, 10, 10, 10, 10, 40, 0, 0, 0, 0, 20, 100]):
+        trace.add(float(second), value)
+    # Six readings make the first point (the step has to be over), five each after that.
+    # The last reading belongs to a point that is not finished yet.
+    assert trace.points() == [15, 4]
+
+    for second in range(12, 40):
+        trace.add(float(second), 7)
+    assert trace.points() == [7, 7, 7]
+
+
+def test_trace_with_gaps_between_readings():
+    trace = mod.Trace(step=5.0)
+    trace.add(0.0, 50)
+    trace.add(3600.0, 70)
+    # A long silence still closes the point it was part of; it does not invent the ones in between.
+    assert trace.points() == [60]
+
+
+def test_card_section(rig):
+    result = rig.build().collect()
+
+    assert result["gpu"] == {
+        "cards": [{"name": "NVIDIA GeForce RTX 3060", "load": 14.0, "mem_used": 911 * MIB, "mem_total": 12288 * MIB}],
+        "history": {"step": mod.HISTORY_STEP, "load": []},
+        "apps": {"count": 5, "mem": 499 * MIB},
+        "error": None,
+    }
+
+
+def test_card_load_history(rig):
+    collector = rig.build()
+    rig.gpu_text = GPU_LINE.replace(", 14,", ", 10,")
+    for second in range(6):
+        if second == 4:
+            rig.gpu_text = GPU_LINE.replace(", 14,", ", 70,")
+        result = collector.collect()
+        rig.tick()
+
+    # The card is read every other second, so each reading counts for two: 10, 10, 10, 10, 70, 70.
+    assert result["gpu"]["history"]["load"] == [30]
+
+
+def test_card_load_history_is_capped(rig):
+    collector = rig.build()
+    for _ in range(int(mod.HISTORY * mod.HISTORY_STEP) + 60):
+        collector.collect()
+        rig.tick()
+
+    history = collector.collect()["gpu"]["history"]["load"]
+    assert len(history) == mod.HISTORY and set(history) == {14}
+
+
+def test_graph_follows_the_busiest_of_several_cards(rig):
+    rig.gpu_text = "NVIDIA RTX A4000, 16376, 100, 5, 40, 30, 20.0, 140.00\nNVIDIA RTX A4000, 16376, 15000, 93, 71, 80, 131.0, 140.00\n"
+    collector = rig.build()
+    for _ in range(7):
+        result = collector.collect()
+        rig.tick()
+
+    assert [card["load"] for card in result["gpu"]["cards"]] == [5.0, 93.0]
+    assert result["gpu"]["history"]["load"] == [93]
+
+
+def test_card_that_cannot_report_its_load(rig):
+    rig.gpu_text = "Tesla K80, 11441, [N/A], [N/A], 35, [N/A], 26.0, 149.00\n"
+    collector = rig.build()
+    for _ in range(12):
+        result = collector.collect()
+        rig.tick()
+
+    assert result["gpu"]["cards"] == [{"name": "Tesla K80", "load": None, "mem_used": None, "mem_total": 11441 * MIB}]
+    assert result["gpu"]["history"]["load"] == []
+    assert result["gpu"]["error"] is None
+
+
+def test_machine_without_a_card(rig):
+    rig.gpu_error = FileNotFoundError("nvidia-smi")
+    result = rig.build().collect()
+
+    assert result["gpu"] == {"cards": [], "history": {"step": mod.HISTORY_STEP, "load": []}, "apps": None, "error": None}
+    # Nothing to list programs of, so the slow report is never asked for.
+    assert rig.calls["apps"] == 0
+
+
+@pytest.mark.parametrize(
+    ("error", "said"),
+    [
+        (subprocess.CalledProcessError(9, "nvidia-smi", output="NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running.\n\n"),
+         "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver. Make sure that the latest NVIDIA driver is installed and running."),
+        (subprocess.CalledProcessError(18, "nvidia-smi", output="", stderr="Failed to initialize NVML: Driver/library version mismatch\nNVML library version: 595.99\n"),
+         "Failed to initialize NVML: Driver/library version mismatch"),
+        (subprocess.CalledProcessError(255, "nvidia-smi"), "Command 'nvidia-smi' returned non-zero exit status 255."),
+        (subprocess.TimeoutExpired("nvidia-smi", 5), "nvidia-smi did not answer in time"),
+        (PermissionError(13, "Permission denied"), "[Errno 13] Permission denied"),
+    ],
+)
+def test_card_that_stops_answering(rig, error, said):
+    collector = rig.build()
+    assert collector.collect()["gpu"]["error"] is None
+
+    rig.gpu_error = error
+    rig.tick(mod.GPU_EVERY)
+    result = collector.collect()
+
+    assert result["gpu"]["cards"] == [] and result["gpu"]["apps"] is None
+    assert result["gpu"]["error"] == said
+    # The rest of the machine is still reported.
+    assert result["ok"] is True and result["power"]["gpu_w"] is None and result["power"]["wall_w"] is not None
+
+    rig.gpu_error = None
+    rig.tick(mod.GPU_EVERY)
+    result = collector.collect()
+    assert result["gpu"]["error"] is None and len(result["gpu"]["cards"]) == 1
+
+
+def test_history_survives_a_card_that_drops_out(rig):
+    collector = rig.build()
+    for _ in range(7):
+        collector.collect()
+        rig.tick()
+    rig.gpu_error = subprocess.TimeoutExpired("nvidia-smi", 5)
+    for _ in range(20):
+        result = collector.collect()
+        rig.tick()
+
+    # What was seen stays on the graph; the silence adds nothing to it.
+    assert result["gpu"]["history"]["load"] == [14]
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("nvidia-smi"), subprocess.CalledProcessError(9, "nvidia-smi"), subprocess.TimeoutExpired("nvidia-smi", 5)])
+def test_program_list_failing_does_not_cost_the_readings(rig, error):
+    rig.apps_error = error
+    result = rig.build().collect()
+
+    assert result["gpu"]["apps"] is None and result["gpu"]["error"] is None
+    assert result["gpu"]["cards"][0]["load"] == 14.0
+
+
+def test_program_list_that_cannot_be_read(rig):
+    rig.apps_text = "garbage"
+
+    assert rig.build().collect()["gpu"]["apps"] is None
+
+
+def test_program_list_is_refreshed(rig):
+    collector = rig.build()
+    assert collector.collect()["gpu"]["apps"]["count"] == 5
+
+    rig.apps_text = report([app(1, "C", "python3", "9000 MiB")])
+    rig.tick(mod.GPU_APPS_EVERY - 1)
+    assert collector.collect()["gpu"]["apps"]["count"] == 5
+    rig.tick(1)
+    assert collector.collect()["gpu"]["apps"] == {"count": 1, "mem": 9000 * MIB}

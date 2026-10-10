@@ -169,6 +169,12 @@ class EventLog:
             else:
                 self._add("TEMP", level, f"{temp['name']} at {temp['c']:.0f} C")
 
+        was_gpu, gpu = before.get("gpu") or {}, after.get("gpu") or {}
+        if gpu.get("error") and not was_gpu.get("error"):
+            self._add("GPU", "crit", f"card not answering: {gpu['error']}")
+        elif was_gpu.get("error") and not gpu.get("error") and gpu.get("cards"):
+            self._add("GPU", "info", "card is answering again")
+
         was_power, power = before.get("power") or {}, after.get("power") or {}
         if power.get("cpu_measured") and was_power.get("cpu_measured") is False:
             self._add("PWR", "info", "processor power is now measured")

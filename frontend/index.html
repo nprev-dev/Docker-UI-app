@@ -102,9 +102,16 @@
             <header class="sec-head"><h3>UPS / room</h3></header>
             <div data-f="ups"></div>
           </section>
+          <section class="sec" data-panel="hardware">
+            <header class="sec-head"><h3>GPU</h3><span class="sec-meta" data-f="card-tag"></span></header>
+            <div data-f="cards"></div>
+            <p class="line spark"><canvas class="graph" data-f="card-spark" role="img" aria-label="Graphics card load over the last minutes"></canvas><span class="faint" data-f="card-spark-label"></span></p>
+            <p class="line faint"><span class="key">model  </span>unloaded</p>
+            <p class="line free"><span class="key">apps   </span><span data-f="card-apps"></span></p>
+          </section>
           <section class="sec" id="agents">
             <header class="sec-head"><h3>Agents</h3><span class="sec-meta">not connected yet</span></header>
-            <p class="line faint">NAME             STATE      TASK                          LAST ACTION</p>
+            <p class="line faint">NAME         STATE     TASK</p>
             <p class="line faint">-- no agents are reporting --</p>
             <p class="line"> </p>
             <p class="line"> </p>

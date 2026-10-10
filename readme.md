@@ -27,6 +27,7 @@ The rest of the page is detail:
 | Latency / WAN | Ping to the gateway and to an outside address, DNS lookup time, public IP and how long it has been held, last speed test |
 | Listening | Open ports, what owns them, and whether they can be reached from the network or only from the machine itself |
 | Power | CPU and GPU watts, an estimate of the draw at the wall, energy today and this month, and the cost if a price is set |
+| GPU | Load and memory of each NVIDIA card with a few minutes of history, and how many programs are using it. With several cards the first two get a line each |
 | Temperature, Fans / volts | Whatever `hwmon` and `nvidia-smi` report |
 | Hardware | Board, BIOS, CPU, memory, GPU, disks |
 | UPS / room | A USB UPS known to `upower`, and an optional room temperature sensor |
@@ -148,7 +149,7 @@ The checks of the animation logic are written in JavaScript and run under `gjs`,
 ## Not done yet
 
 - The Agents section is empty.
-- Nothing about GPU workloads or loaded AI models.
+- The GPU section does not know which AI model is loaded. Its `model` line always reads `unloaded` for now.
 - No view of the switch ports.
 - It has only ever run on one machine (AMD CPU, NVIDIA GPU). Other hardware will probably leave gaps in the power, temperature and fan sections.
 

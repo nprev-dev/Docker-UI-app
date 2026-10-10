@@ -18,6 +18,8 @@ import {
 // Lines available under each section heading; the UPS section sits in a shorter row.
 const LIST_ROWS = 7;
 const UPS_ROWS = 5;
+// Of the graphics card section's five lines, this many are for the cards themselves.
+const CARD_ROWS = 2;
 // The power graph never zooms in further than this, so a quiet machine does not look like a busy one.
 const FLOOR_WATTS = 50;
 
@@ -214,6 +216,106 @@ function renderUps(ups, room) {
   fill(f.ups, lines, UPS_ROWS);
 }
 
+// --- Graphics card ---------------------------------------------------------------
+
+const card = { history: [], step: 5 };
+let cardRows = [];
+let cardsKey = null;
+
+// "NVIDIA GeForce RTX 3060" -> "RTX 3060": the maker is no news on a line this short.
+const shortCard = (name) => name.replace(/^NVIDIA\s+/i, "").replace(/^GeForce\s+/i, "");
+const share = (value) => (value == null ? "-" : `${value.toFixed(0)}%`);
+const held = (used, total) => (used == null ? "-" : total ? `${formatBytes(used)}/${formatBytes(total)}` : formatBytes(used));
+
+function meterLine(name, cells) {
+  const meter = buildMeter(cells);
+  const value = element("span");
+  const node = element("p", "line");
+  node.append(key(name), meter.meter, value);
+  return { node, meter, value };
+}
+
+// Lays the card lines out afresh. That only happens when the set of cards changes, or one stops answering.
+function layCards(cards, error) {
+  const lines = [];
+  cardRows = [];
+  if (!cards.length) {
+    const node = line("gpu", error ? "not answering" : "none found", "line faint");
+    if (error) node.dataset.tone = "crit";
+    lines.push(node);
+  } else if (cards.length === 1) {
+    // A single card gets one line for how hard it is working and one for how full its memory is.
+    const load = meterLine("util", 20);
+    const memory = meterLine("vram", 20);
+    const row = { total: null };
+    row.load = new Glide((value) => {
+      drawMeter(load.meter, value);
+      setText(load.value, share(value).padStart(12));
+    });
+    row.used = new Glide((value) => {
+      drawMeter(memory.meter, value == null || !row.total ? null : (value / row.total) * 100);
+      setText(memory.value, held(value, row.total).padStart(12));
+    });
+    cardRows.push(row);
+    lines.push(load.node, memory.node);
+  } else {
+    // Several cards get a line each, for as many as there are lines.
+    cards.slice(0, CARD_ROWS).forEach((_, index) => {
+      const load = meterLine(`gpu${index}`, 8);
+      const memory = load.node.appendChild(element("span"));
+      const row = { total: null };
+      row.load = new Glide((value) => {
+        drawMeter(load.meter, value);
+        setText(load.value, share(value).padStart(5));
+      });
+      row.used = new Glide((value) => setText(memory, held(value, row.total).padStart(13)));
+      cardRows.push(row);
+      lines.push(load.node);
+    });
+  }
+  while (lines.length < CARD_ROWS) lines.push(element("p", "line", " "));
+  f.cards.replaceChildren(...lines);
+}
+
+function drawCard() {
+  const s = surface(f["card-spark"]);
+  const shown = card.history.slice(-s.slots);
+  const pad = Math.round(s.height * 0.15);
+  // Always drawn against 100%, never zoomed in: an idle card has to look idle.
+  sticks(s, shown.map((value) => value / 100), s.colour("--ink-2"), s.height - pad, s.height - 2 * pad, true);
+  const span = formatDuration(shown.length * card.step).padStart(3);
+  setText(f["card-spark-label"], shown.length ? ` ${span} max ${share(Math.max(...shown))}` : "");
+}
+
+function renderCards(data) {
+  const cards = data.cards ?? [];
+  const error = data.error ?? null;
+  const signature = JSON.stringify([cards.map((item) => item.name), error]);
+  if (signature !== cardsKey) {
+    cardsKey = signature;
+    layCards(cards, error);
+  }
+  cardRows.forEach((row, index) => {
+    row.total = cards[index].mem_total;
+    row.load.set(cards[index].load);
+    row.used.set(cards[index].mem_used);
+  });
+
+  const extra = cards.length > CARD_ROWS ? `, ${CARD_ROWS} shown` : "";
+  const names = cards.length === 1 ? shortCard(cards[0].name) : cards.length ? `${cards.length} cards${extra}` : "";
+  f["card-tag"].dataset.tone = error ? "crit" : "";
+  setText(f["card-tag"], error ? `!! ${error}` : names);
+  f["card-tag"].title = error ?? cards.map((item) => item.name).join(", ");
+
+  card.history = data.history?.load ?? [];
+  card.step = data.history?.step ?? 5;
+  drawCard();
+
+  const apps = data.apps;
+  const size = apps?.mem == null ? "" : `  ${formatBytes(apps.mem)}`;
+  setText(f["card-apps"], apps == null ? "-" : apps.count ? `${apps.count} program${apps.count === 1 ? "" : "s"}${size}` : "none");
+}
+
 // --- Panel -----------------------------------------------------------------------
 
 export function renderHardware(data) {
@@ -224,10 +326,16 @@ export function renderHardware(data) {
   if (failed) return;
   renderInventory(data.inventory ?? {});
   renderPower(data.power ?? {});
+  renderCards(data.gpu ?? {});
   renderTemps(data.temps ?? []);
   renderCooling(data);
   renderUps(data.ups, data.room);
 }
 
-// The font scales with the window, so the graph must be redrawn to stay on the character grid.
-addEventListener("resize", () => requestAnimationFrame(drawPower));
+// The font scales with the window, so the graphs must be redrawn to stay on the character grid.
+addEventListener("resize", () =>
+  requestAnimationFrame(() => {
+    drawPower();
+    drawCard();
+  }),
+);
