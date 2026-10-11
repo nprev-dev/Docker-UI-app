@@ -27,6 +27,38 @@ def data_dir(platform: str = sys.platform, environ: Mapping[str, str] = os.envir
     return base / NAME
 
 
+def config_dir(platform: str = sys.platform, environ: Mapping[str, str] = os.environ, home: Path | None = None) -> Path:
+    """The user's own folder for an application's settings."""
+    home = home or Path.home()
+    if platform == "win32":
+        base = Path(environ.get("APPDATA") or home / "AppData" / "Roaming")
+    else:
+        # macOS programs run from a terminal keep their settings here too, as Linux ones do.
+        given = environ.get("XDG_CONFIG_HOME", "")
+        base = Path(given) if given.startswith("/") and platform != "darwin" else home / ".config"
+    return base / NAME
+
+
+def read_settings(path: Path) -> dict[str, str]:
+    """The KEY=value lines of a settings file. Blank lines and lines starting with # are skipped,
+    and so is anything else that is not a setting; a missing file is no settings at all."""
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except (OSError, UnicodeError):
+        return {}
+    settings = {}
+    for line in lines:
+        key, found, value = line.strip().partition("=")
+        key, value = key.strip(), value.strip()
+        if not found or not key or key.startswith("#") or not key.replace("_", "").isalnum():
+            continue
+        # Quotes around a value are how people write one with spaces; they are not part of it.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        settings[key] = value
+    return settings
+
+
 def state_file(environ: Mapping[str, str] = os.environ, package: Path = PACKAGE) -> Path:
     """The file holding totals and history: wherever DASH_STATE says, else the user's data folder."""
     explicit = environ.get("DASH_STATE")

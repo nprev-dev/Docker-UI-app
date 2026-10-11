@@ -34,6 +34,10 @@ dev = ["pytest>=8", "psutil>=5.9"]
 [project.scripts]
 rack-dashboard = "rack_dashboard.cli:main"
 
+# The same thing without a console window, for Windows to start at sign-in.
+[project.gui-scripts]
+rack-dashboardw = "rack_dashboard.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/nprev-dev/Docker-UI-app"
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import threading
 import webbrowser
 
@@ -30,8 +31,31 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def load_settings(environ=os.environ) -> None:
+    """Settings from the settings file become environment variables, unless one is set already:
+    what was typed for this one run wins over what was written down for every run."""
+    for key, value in paths.read_settings(paths.config_dir() / "env").items():
+        environ.setdefault(key, value)
+
+
+def keep_a_log() -> None:
+    """Started without a window (as Windows does at sign-in) there is nowhere to print to.
+    What would have been printed goes to a file beside the saved data instead."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    try:
+        folder = paths.data_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        log = open(folder / "rack-dashboard.log", "w", buffering=1, encoding="utf-8")
+    except OSError:
+        log = open(os.devnull, "w")
+    sys.stdout = sys.stderr = log
+
+
 def main(argv: list[str] | None = None) -> int:
     options = parse(argv)
+    keep_a_log()
+    load_settings()
     # Settings travel as environment variables, because the app reads them once, as it is loaded.
     if options.host:
         os.environ["DASH_HOST"] = options.host

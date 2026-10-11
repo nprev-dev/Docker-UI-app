@@ -65,3 +65,45 @@ def test_the_tests_do_not_touch_the_real_state_file():
 
     assert "rack-dashboard-tests-" in str(app.state.path)
     assert app.state.path != paths.PACKAGE.parent / "data" / "state.json"
+
+
+def test_settings_folder_on_each_system():
+    assert paths.config_dir("linux", {}, Path("/home/someone")) == Path("/home/someone/.config/rack-dashboard")
+    assert paths.config_dir("linux", {"XDG_CONFIG_HOME": "/etc/xdg-user"}, Path("/home/someone")) == Path("/etc/xdg-user/rack-dashboard")
+    assert paths.config_dir("linux", {"XDG_CONFIG_HOME": "relative"}, Path("/home/someone")) == Path("/home/someone/.config/rack-dashboard")
+    assert paths.config_dir("darwin", {"XDG_CONFIG_HOME": "/etc/xdg-user"}, Path("/Users/someone")) == Path("/Users/someone/.config/rack-dashboard")
+    assert paths.config_dir("win32", {"APPDATA": "C:/Users/someone/AppData/Roaming"}, Path("C:/Users/someone")) == Path("C:/Users/someone/AppData/Roaming/rack-dashboard")
+    assert paths.config_dir("win32", {}, Path("C:/Users/someone")) == Path("C:/Users/someone/AppData/Roaming/rack-dashboard")
+
+
+def test_settings_file_is_read(tmp_path):
+    file = tmp_path / "env"
+    file.write_text(
+        "# Settings for Rack Dashboard\n"
+        "\n"
+        "DASH_HOST=0.0.0.0\n"
+        "  DASH_PORT = 9000  \n"
+        "DASH_CURRENCY=\"CA$ \"\n"
+        "DASH_ROOM_SENSOR='/sys/bus/w1/devices/28-00000a/temperature'\n"
+        "DASH_KWH_PRICE=\n"
+        "#DASH_PROBES=0\n"
+        "not a setting\n"
+        "=nothing\n"
+        "bad key=1\n"
+        "DASH_DNS_NAME=a=b\n"
+    )
+
+    assert paths.read_settings(file) == {
+        "DASH_HOST": "0.0.0.0", "DASH_PORT": "9000", "DASH_CURRENCY": "CA$ ", "DASH_ROOM_SENSOR": "/sys/bus/w1/devices/28-00000a/temperature",
+        "DASH_KWH_PRICE": "", "DASH_DNS_NAME": "a=b",
+    }
+
+
+def test_settings_file_missing_or_unreadable(tmp_path):
+    assert paths.read_settings(tmp_path / "nope") == {}
+    assert paths.read_settings(tmp_path) == {}
+    (tmp_path / "binary").write_bytes(b"\xff\xfe\x00DASH")
+    assert paths.read_settings(tmp_path / "binary") == {}
+    # Notepad on Windows likes to put a marker at the start of a file; it is not part of the first key.
+    (tmp_path / "marked").write_bytes(b"\xef\xbb\xbfDASH_PORT=9000\r\nDASH_HOST=0.0.0.0\r\n")
+    assert paths.read_settings(tmp_path / "marked") == {"DASH_PORT": "9000", "DASH_HOST": "0.0.0.0"}

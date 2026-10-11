@@ -50,3 +50,49 @@ def test_help_names_the_settings(capsys):
 
     text = capsys.readouterr().out
     assert "--host" in text and "--port" in text and "--open" in text and "DASH_" in text
+
+
+def test_written_settings_do_not_override_what_is_set_for_this_run(tmp_path, monkeypatch):
+    (tmp_path / "rack-dashboard").mkdir()
+    (tmp_path / "rack-dashboard" / "env").write_text("DASH_HOST=0.0.0.0\nDASH_PORT=9000\n")
+    monkeypatch.setattr(cli.paths, "config_dir", lambda: tmp_path / "rack-dashboard")
+    environ = {"DASH_PORT": "8800"}
+
+    cli.load_settings(environ)
+
+    assert environ == {"DASH_PORT": "8800", "DASH_HOST": "0.0.0.0"}
+
+
+def test_no_settings_file_is_fine(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.paths, "config_dir", lambda: tmp_path / "absent")
+    environ = {}
+
+    cli.load_settings(environ)
+
+    assert environ == {}
+
+
+def test_without_a_window_output_goes_to_a_log(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(cli.paths, "data_dir", lambda: tmp_path / "data")
+    monkeypatch.setattr(sys, "stdout", None)
+    monkeypatch.setattr(sys, "stderr", None)
+
+    cli.keep_a_log()
+    print("started")
+    sys.stderr.write("a warning\n")
+    sys.stdout.close()
+
+    assert (tmp_path / "data" / "rack-dashboard.log").read_text() == "started\na warning\n"
+
+
+def test_with_a_window_nothing_is_redirected(tmp_path, monkeypatch):
+    import sys
+
+    monkeypatch.setattr(cli.paths, "data_dir", lambda: tmp_path / "data")
+    before = (sys.stdout, sys.stderr)
+
+    cli.keep_a_log()
+
+    assert (sys.stdout, sys.stderr) == before and not (tmp_path / "data").exists()
