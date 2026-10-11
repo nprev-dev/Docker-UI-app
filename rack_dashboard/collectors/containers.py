@@ -252,10 +252,10 @@ _FRACTION = re.compile(r"\.(\d+)")
 
 
 def _parse_time(stamp: str | None) -> float | None:
-    """Docker stamps carry nanoseconds; trim them to the microseconds datetime accepts."""
+    """Docker stamps carry nanoseconds; datetime wants exactly six digits (older Pythons insist on it)."""
     if not stamp or stamp.startswith("0001-"):
         return None
-    trimmed = _FRACTION.sub(lambda m: "." + m.group(1)[:6], stamp, count=1).replace("Z", "+00:00")
+    trimmed = _FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), stamp, count=1).replace("Z", "+00:00")
     try:
         return datetime.fromisoformat(trimmed).timestamp()
     except ValueError:

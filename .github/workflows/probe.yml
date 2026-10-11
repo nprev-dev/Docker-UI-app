@@ -1,0 +1,22 @@
+# Temporary, on the test branch only: shows what Windows and macOS say about themselves.
+name: probe
+on:
+  push:
+    branches: ["ci/**"]
+permissions:
+  contents: read
+jobs:
+  probe:
+    name: probe, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install psutil docker
+      - run: python .github/probe.py

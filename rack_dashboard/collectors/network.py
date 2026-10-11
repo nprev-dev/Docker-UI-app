@@ -214,13 +214,15 @@ def _scope(addresses: list[str]) -> str:
 
 # The registered names of a few common services are more cryptic than what everyone calls them.
 SERVICE_ALIASES = {"domain": "dns", "ms-wbt-server": "rdp", "ipp": "cups"}
+# Not every system's list of services is as complete as Linux's; these fill its commonest gaps.
+SERVICE_FALLBACK = {(22, "tcp"): "ssh", (53, "tcp"): "dns", (53, "udp"): "dns", (5353, "udp"): "mdns", (3389, "tcp"): "rdp", (3389, "udp"): "rdp"}
 
 
 def _service(port: int, proto: str) -> str | None:
     try:
         name = socket.getservbyport(port, proto)
     except (OSError, OverflowError):
-        return None
+        return SERVICE_FALLBACK.get((port, proto))
     return SERVICE_ALIASES.get(name, name)
 
 
