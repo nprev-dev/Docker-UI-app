@@ -13,7 +13,7 @@ import urllib.request
 from collections import deque
 from typing import Callable
 
-from backend.collectors.util import brief
+from rack_dashboard.collectors.util import brief
 
 MB = 1000 * 1000
 

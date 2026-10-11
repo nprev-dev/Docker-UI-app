@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from backend.app import Hub
+from rack_dashboard.app import Hub
 
 
 def test_new_viewer_gets_the_latest_snapshot_at_once():

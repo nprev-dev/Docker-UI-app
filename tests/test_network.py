@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-from backend.collectors import network as mod
-from backend.collectors.network import DayTotals, NetworkCollector, Sock, Talkers
-from backend.state import StateFile
+from rack_dashboard.collectors import network as mod
+from rack_dashboard.collectors.network import DayTotals, NetworkCollector, Sock, Talkers
+from rack_dashboard.state import StateFile
 
 ROUTES = """Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
 enp3s0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\t0\t0\t0

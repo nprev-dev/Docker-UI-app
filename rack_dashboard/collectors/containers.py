@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.collectors.util import brief
+from rack_dashboard.collectors.util import brief
 
 # Only these states have live counters; asking for stats on the rest is wasted work.
 STATS_STATES = {"running", "paused"}

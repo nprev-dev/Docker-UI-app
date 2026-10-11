@@ -6,8 +6,8 @@ import json
 
 import pytest
 
-from backend.collectors import containers as mod
-from backend.collectors.containers import ContainerCollector
+from rack_dashboard.collectors import containers as mod
+from rack_dashboard.collectors.containers import ContainerCollector
 
 GIB = 1024**3
 T0 = "2026-10-04T18:00:00.000000000Z"

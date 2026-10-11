@@ -46,35 +46,49 @@ Colour is kept for trouble. A healthy system is blue and white only. Amber and r
 
 If the page loses its connection to the backend, every reading is dimmed so that old numbers cannot pass for live ones.
 
+## Install
+
+On the Linux machine you want to watch, as the user who should run it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nprev-dev/Docker-UI-app/main/install.sh | sh
+```
+
+Then open <http://127.0.0.1:8787> on that machine. To open the page from other machines on your network as well, install it with `--lan`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nprev-dev/Docker-UI-app/main/install.sh | sh -s -- --lan
+```
+
+There is no login. With `--lan`, anyone who can reach the machine sees your open ports, addresses and container names, so use it only on a network you trust.
+
+The script needs no root and keeps to your home folder. This is what it does:
+
+- It fetches [uv](https://docs.astral.sh/uv/) from astral.sh if you do not have it. uv brings its own Python, so none has to be installed, and its installer adds `~/.local/bin` to your shell's `PATH`.
+- It has uv install the dashboard from this repository, which gives you a `rack-dashboard` command.
+- On a system with systemd it registers a service for your user, so the dashboard starts when the machine does and comes back if it crashes. For that it switches on "lingering" for your user (`loginctl enable-linger`), which is what lets a user's services run with nobody logged in.
+
+Other options: `--port N` to listen on another port, `--no-service` to get the command without the service. Running the script again updates to the newest version and keeps your settings. To remove it:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nprev-dev/Docker-UI-app/main/install.sh | sh -s -- --uninstall
+```
+
+For a monitor in the rack, start the browser in kiosk mode, for example `firefox --kiosk http://127.0.0.1:8787`. The layout is made for a 16:9 screen. Text size follows the window, and the page has been checked from 1024x768 up to 4K.
+
 ## Requirements
 
-- Linux. Developed and tested on Ubuntu 26.04 with Python 3.14.
-- Docker, with its socket readable by the user that runs the dashboard. Tested with Docker Desktop for Linux; a normal Docker Engine socket at `/var/run/docker.sock` is tried first. Without Docker the page still runs and says so.
+- Linux. Developed and tested on Ubuntu 26.04.
+- Docker, with its socket usable by the user that runs the dashboard (on most systems that means being in the `docker` group). Tested with Docker Desktop for Linux; a normal Docker Engine socket at `/var/run/docker.sock` is tried first. Without Docker the page still runs and says so.
 - `ss` from iproute2, which practically every distribution ships.
 - Optional: `nvidia-smi` for GPU readings and `upower` for a UPS.
-- A current Firefox or Chromium-based browser.
+- A current Firefox or Chromium-based browser to look at it.
 
 Pings use unprivileged ICMP sockets. Ubuntu allows these by default; elsewhere check `net.ipv4.ping_group_range`.
 
-## Running it
-
-```bash
-git clone https://github.com/nprev-dev/Docker-UI-app.git
-cd Docker-UI-app
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-./run.sh
-```
-
-Then open <http://127.0.0.1:8787>. For a monitor in the rack, start the browser in kiosk mode, for example `firefox --kiosk http://127.0.0.1:8787`.
-
-The layout is made for a 16:9 screen. Text size follows the window, and the page has been checked from 1366x768 up to 4K.
-
-There is no login. By default the server listens on localhost only. Setting `DASH_HOST=0.0.0.0` makes the page reachable from other machines, and with it your open ports, addresses and container names, so do that only on a network you trust.
-
 ## Settings
 
-Everything is set through environment variables, for example `DASH_KWH_PRICE=0.14 ./run.sh`.
+Everything is set through environment variables. The installed service reads them from `~/.config/rack-dashboard/env`, one `KEY=value` per line; after a change, run `systemctl --user restart rack-dashboard`. Started by hand, they go in front of the command, for example `DASH_KWH_PRICE=0.14 rack-dashboard`. The address and port can also be given as `--host` and `--port`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -94,7 +108,7 @@ Everything is set through environment variables, for example `DASH_KWH_PRICE=0.1
 | `DASH_PSU_EFFICIENCY` | `0.87` | Power supply efficiency used for the wall figure |
 | `DASH_CPU_IDLE_W`, `DASH_CPU_MAX_W` | `25`, `142` | CPU power at idle and at full load, used only while it cannot be measured |
 | `DASH_ROOM_SENSOR` | unset | Path of a file holding a temperature, as 1-wire and USB sensors provide |
-| `DASH_STATE` | `data/state.json` | Where totals and history are kept between restarts |
+| `DASH_STATE` | `~/.local/share/rack-dashboard/state.json` | Where totals and history are kept between restarts |
 
 ## What it sends over the network
 
@@ -108,7 +122,7 @@ Everything on the page is read from the machine itself, except for the checks be
 
 `DASH_PROBES=0` turns all of it off, and `DASH_SPEEDTEST_HOURS=0` turns off only the speed test.
 
-`data/state.json` holds the daily totals, speed test history, the event log and your public IP address. That last one is the reason `data/` is in `.gitignore`.
+The state file (`~/.local/share/rack-dashboard/state.json`) holds the daily totals, speed test history, the event log and your public IP address. It never leaves the machine.
 
 ## About the power figures
 
@@ -131,18 +145,32 @@ sudo modprobe nct6775
 ## How it is put together
 
 ```
-backend/     FastAPI app. Three collectors (containers, network, hardware) run once a second
-             and the result is pushed to every open page over Server-Sent Events.
-frontend/    The page: ES modules, canvas for the graphs and the centrepiece, no framework.
-tests/       pytest suite, plus checks of the animation logic.
+rack_dashboard/            FastAPI app. Three collectors (containers, network, hardware) run once
+                           a second and the result is pushed to every open page over
+                           Server-Sent Events.
+rack_dashboard/frontend/   The page: ES modules, canvas for the graphs and the centrepiece,
+                           no framework.
+tests/                     pytest suite, plus checks of the animation logic.
+install.sh                 The installer described above.
 ```
 
 `GET /api/snapshot` returns the latest reading as JSON and `GET /api/stream` is the live stream, in case you want the data for something else.
 
-## Tests
+## Working on it
 
 ```bash
-.venv/bin/pip install -r requirements-dev.txt
+git clone https://github.com/nprev-dev/Docker-UI-app.git
+cd Docker-UI-app
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+./run.sh
+```
+
+Run from a copy of the source like this, the dashboard keeps its state in a `data/` folder beside the code if there is one, which is why `data/` is in `.gitignore`.
+
+The tests:
+
+```bash
 .venv/bin/python -m pytest
 ```
 
@@ -159,4 +187,4 @@ The checks of the animation logic are written in JavaScript and run under `gjs`,
 
 MIT. See `LICENSE`.
 
-The bundled fonts, IBM Plex Sans and IBM Plex Mono, come under the SIL Open Font License. Its text is in `frontend/fonts/LICENSE.txt`.
+The bundled fonts, IBM Plex Sans and IBM Plex Mono, come under the SIL Open Font License. Its text is in `rack_dashboard/frontend/fonts/LICENSE.txt`.

@@ -7,9 +7,9 @@ import struct
 
 import pytest
 
-from backend.collectors import probes
-from backend.collectors.probes import Every, SpeedTester, WanTracker
-from backend.state import StateFile
+from rack_dashboard.collectors import probes
+from rack_dashboard.collectors.probes import Every, SpeedTester, WanTracker
+from rack_dashboard.state import StateFile
 
 
 @pytest.fixture

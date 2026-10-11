@@ -1,0 +1,64 @@
+# Runs the tests, and the dashboard itself, on Linux, Windows and macOS.
+name: tests
+
+on:
+  push:
+    branches: [main, "ci/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: tests, ${{ matrix.os }}, Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The oldest Python the package claims to support, and the newest.
+        python: ["3.10", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e ".[dev]"
+      - run: python -m pytest -q
+
+  run:
+    name: start it, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # Installed the way a user gets it, not run from the source folder.
+      - run: python -m pip install .
+      - name: Start the dashboard and ask it for a reading
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          rack-dashboard --version
+          rack-dashboard --port 8787 > server.log 2>&1 &
+          python "$GITHUB_WORKSPACE/tests/smoke.py" http://127.0.0.1:8787 || { echo "--- server log"; cat server.log; exit 1; }
+
+  install:
+    name: install script, ubuntu-latest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # From GitHub, exactly as the readme says, but at the commit being tested.
+      - run: sh install.sh --no-service --ref "$GITHUB_SHA"
+      - name: Start what was installed and ask it for a reading
+        run: |
+          cd "$RUNNER_TEMP"
+          ~/.local/bin/rack-dashboard --version
+          ~/.local/bin/rack-dashboard --port 8787 > server.log 2>&1 &
+          python3 "$GITHUB_WORKSPACE/tests/smoke.py" http://127.0.0.1:8787 || { echo "--- server log"; cat server.log; exit 1; }

@@ -8,9 +8,9 @@ import time
 
 import pytest
 
-from backend.collectors import hardware as mod
-from backend.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
-from backend.state import StateFile
+from rack_dashboard.collectors import hardware as mod
+from rack_dashboard.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
+from rack_dashboard.state import StateFile
 
 GIB = 1024**3
 MIB = 1024**2

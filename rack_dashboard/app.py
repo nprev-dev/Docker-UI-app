@@ -8,23 +8,21 @@ import os
 import socket
 import time
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.collectors.containers import ContainerCollector
-from backend.collectors.hardware import HardwareCollector
-from backend.collectors.network import NetworkCollector, label_ports, read_boot
-from backend.events import EventLog
-from backend.state import StateFile
+from rack_dashboard import paths
+from rack_dashboard.collectors.containers import ContainerCollector
+from rack_dashboard.collectors.hardware import HardwareCollector
+from rack_dashboard.collectors.network import NetworkCollector, label_ports, read_boot
+from rack_dashboard.events import EventLog
+from rack_dashboard.state import StateFile
 
-ROOT = Path(__file__).resolve().parent.parent
 INTERVAL = float(os.environ.get("DASH_INTERVAL", "1"))
 # Idle proxies and browsers drop silent connections; a comment line keeps the stream open.
 KEEPALIVE = 15
-FRONTEND = ROOT / "frontend"
 
 
 class Hub:
@@ -56,7 +54,7 @@ def number(name: str) -> float | None:
 
 
 hub = Hub()
-state = StateFile(os.environ.get("DASH_STATE", ROOT / "data" / "state.json"))
+state = StateFile(paths.state_file())
 containers = ContainerCollector()
 hardware = HardwareCollector(
     state,
@@ -180,4 +178,4 @@ class FreshStaticFiles(StaticFiles):
 
 
 # Mounted last so it never shadows the API routes above.
-app.mount("/", FreshStaticFiles(directory=FRONTEND, html=True), name="frontend")
+app.mount("/", FreshStaticFiles(directory=paths.FRONTEND, html=True), name="frontend")

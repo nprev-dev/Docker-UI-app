@@ -3,4 +3,4 @@
 # DASH_HOST and DASH_PORT change where it listens; DASH_INTERVAL the seconds between updates.
 set -euo pipefail
 cd "$(dirname "$0")"
-exec .venv/bin/python -m backend
+exec .venv/bin/python -m rack_dashboard "$@"

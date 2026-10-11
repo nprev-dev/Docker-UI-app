@@ -13,7 +13,7 @@ from collections import Counter, deque
 from pathlib import Path
 from typing import Callable, NamedTuple
 
-from backend.collectors import probes
+from rack_dashboard.collectors import probes
 
 # Samples kept for the throughput graph, one per tick.
 HISTORY = 240
