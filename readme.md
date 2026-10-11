@@ -128,7 +128,7 @@ Windows and macOS do not let an ordinary program read everything Linux does. Whe
 | Fans and voltages | yes, with the board's driver | GPU fan only | no |
 | UPS | a USB UPS, through `upower` | the machine's own battery | the machine's own battery |
 
-So far Windows and macOS have only been run on GitHub's test machines, which are virtual and have neither a graphics card nor a battery. Everything else in those two columns was seen working there. The GPU and battery rows are how the code is written, and nobody has watched them work yet. If you try it on a real Windows PC or Mac, an issue saying what showed up and what did not is welcome.
+So far Windows and macOS have only been run on GitHub's test machines. Those are virtual: no graphics card, no battery, and on the Mac no Docker. The GPU and battery rows, and containers on macOS, are therefore how the code is written, and nobody has watched them work yet. The rest of those two columns was seen working there. If you try it on a real Windows PC or Mac, an issue saying what showed up and what did not is welcome.
 
 ## Settings
 
