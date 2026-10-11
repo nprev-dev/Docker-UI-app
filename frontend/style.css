@@ -308,6 +308,72 @@ p {
   bottom: 0;
   color: var(--ink-3);
   font-size: 0.85rem;
+  /* Only inside its lines do the written gaps count; between them they would become empty lines. */
+  white-space: normal;
+}
+
+.hero-legend p {
+  height: var(--line);
+  white-space: pre;
+}
+
+/* How a line looks from no traffic to the most: faint, then blue, then white. */
+.ramp {
+  display: inline-block;
+  width: 14ch;
+  height: 0.45rem;
+  background: linear-gradient(to right, rgba(93, 124, 255, 0.15), var(--blue), var(--ink));
+}
+
+/* The signs used in the picture, drawn rather than typed so that they match it. */
+.sign {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+}
+
+.sign-up { background: var(--ink); }
+.sign-off { border: 1px solid var(--ink-3); }
+
+.sign-dash {
+  width: 2.4ch;
+  height: 0;
+  border-top: 2px dashed var(--ink);
+  border-radius: 0;
+  vertical-align: 0.22rem;
+}
+
+/* Totals in the corner under the peers, as wide as their labels. */
+.hero-readout {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22ch;
+  padding-left: 1ch;
+  border-left: 1px solid var(--rule-bright);
+}
+
+.hero-readout .line {
+  font-size: 0.85rem;
+}
+
+.hero-readout b {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* Names the two dotted orbits. Each sits just under the lowest point of its own; the script places it. */
+.hero-ring {
+  position: absolute;
+  padding: 0 1ch;
+  transform: translate(-50%, 0.15rem);
+  background: var(--bg);
+  color: var(--ink-3);
+  font: 600 0.78rem / var(--line) var(--sans);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .hero-name {

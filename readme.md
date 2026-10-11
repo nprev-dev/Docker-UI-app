@@ -13,7 +13,9 @@ The screenshots here were taken with made-up containers and addresses.
 
 The top row holds the numbers worth reading from across the room: host and uptime, CPU load and temperature, power draw, network in and out, containers running, internet latency and the clock.
 
-On the left, the server is drawn as a globe with a line to everything it is talking to. Containers sit on one side and network peers on the other. A thicker, brighter bundle of lines means more traffic (log scale, 1 Kbps to 1 Gbps), the dashes travel the way most of the data is going, and the halo around the globe follows CPU load. The five busiest or most troubled things on each side get a label.
+On the left, the server is drawn as a globe with a line to everything it is talking to. Containers sit on one side and network peers on the other. A thicker, brighter bundle of lines means more traffic (log scale, 1 Kbps to 1 Gbps), and the dashes travel the way most of the data is going. Things on the inner dotted orbit are on the local network, things on the outer one are out on the internet. The five busiest or most troubled things on each side get a label, and a corner readout gives the totals.
+
+The field of faint loops behind all of this carries no data of its own. It only follows CPU load: the harder the machine works, the brighter it gets and the faster it turns.
 
 ![The centrepiece](docs/centrepiece.png)
 

@@ -22,11 +22,23 @@
 
     <main class="main">
       <section class="hero" aria-labelledby="hero-title">
+        <canvas id="hero-field" aria-hidden="true"></canvas>
         <canvas id="hero-canvas" role="img" aria-label="The server and everything it is talking to"></canvas>
         <div class="hero-title"><h2 id="hero-title">Server core</h2><span class="sec-meta" id="hero-meta"></span></div>
         <p class="hero-name" id="hero-name"></p>
         <div id="hero-callouts"></div>
-        <p class="hero-legend">brighter line = more traffic   dashes = direction   halo = cpu load</p>
+        <span class="hero-ring" data-ring="0.78">local network</span>
+        <span class="hero-ring" data-ring="1">internet</span>
+        <div class="hero-legend">
+          <p>1 Kbps <i class="ramp"></i> 1 Gbps</p>
+          <p><i class="sign sign-up"></i> running   <i class="sign sign-off"></i> stopped   <i class="sign sign-dash"></i> direction</p>
+          <p>field = cpu load</p>
+        </div>
+        <div class="hero-readout">
+          <p class="line"><span class="key">in      </span><b id="hero-in">-</b></p>
+          <p class="line"><span class="key">out     </span><b id="hero-out">-</b></p>
+          <p class="line free"><span class="key">busiest </span><b id="hero-busiest">-</b></p>
+        </div>
       </section>
 
       <div class="side">

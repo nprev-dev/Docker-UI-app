@@ -32,6 +32,10 @@ const DASH_SLOW = 0.02;
 const DASH_FAST = 0.09;
 const SPIN_IDLE = 0.00025;
 const SPIN_BUSY = 0.00145;
+// The field around the globe turns far more slowly: its loops reach the edges of the panel, where
+// the globe's own speed would be a blur, and its picture is only redrawn a few times a second.
+const DRIFT_IDLE = 0.000012;
+const DRIFT_BUSY = 0.000036;
 
 // 1 Kbps and below is silence, 1 Gbps is full brightness.
 export const intensity = (bitsPerSecond) => (bitsPerSecond <= 1000 ? 0 : Math.min(1, Math.log10(bitsPerSecond / 1000) / 6));
@@ -66,6 +70,7 @@ export class Scene {
     this.nodes = new Map();
     this.load = 0;
     this.spin = 0;
+    this.drift = 0;
     this.goal = { load: 0 };
     this.speed = { load: 0 };
     this.updated = null;
@@ -133,6 +138,7 @@ export class Scene {
   step(elapsed, still = false) {
     const dashSpeed = (node) => node.flow * (DASH_SLOW + (DASH_FAST - DASH_SLOW) * node.level);
     const spinSpeed = () => SPIN_IDLE + (SPIN_BUSY - SPIN_IDLE) * this.load;
+    const driftSpeed = () => DRIFT_IDLE + (DRIFT_BUSY - DRIFT_IDLE) * this.load;
 
     for (const node of this.nodes.values()) {
       const dashedBefore = dashSpeed(node);
@@ -162,8 +168,10 @@ export class Scene {
       return;
     }
     const spunBefore = spinSpeed();
+    const driftedBefore = driftSpeed();
     glide(this, "load", LOAD_MS, elapsed);
     this.load = Math.min(1, Math.max(0, this.load));
     this.spin += (elapsed * (spunBefore + spinSpeed())) / 2;
+    this.drift += (elapsed * (driftedBefore + driftSpeed())) / 2;
   }
 }

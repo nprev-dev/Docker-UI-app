@@ -1,10 +1,12 @@
-// Centrepiece: the server as a glowing core, with a field line to everything it talks to.
+// Centrepiece: the server as a glowing core, with a line to everything it talks to.
 // Containers sit on the left, network peers on the right. A brighter, thicker bundle of lines means
 // more traffic (on a log scale); the dashes on a line move the way the data moves.
+// Behind all that, a field of loops fills the panel (see field.js); it only follows processor load.
 // What is drawn is always the scene's present state, which glides (see scene.js): nothing in here
 // may switch on a threshold, or the picture would jump when data arrives.
 
 import { calm, cellWidth, element, formatRate, formatRateShort, setText } from "./common.js";
+import { settleField, tendField } from "./field.js";
 import { Scene } from "./scene.js";
 
 // Frames per second, best first. The picture starts at the top rate and steps down when one frame
@@ -40,6 +42,8 @@ const canvas = document.getElementById("hero-canvas");
 const calloutLayer = document.getElementById("hero-callouts");
 const meta = document.getElementById("hero-meta");
 const nameLabel = document.getElementById("hero-name");
+const ringLabels = Array.from(document.querySelectorAll(".hero-ring"));
+const readout = { in: document.getElementById("hero-in"), out: document.getElementById("hero-out"), busiest: document.getElementById("hero-busiest") };
 const context = canvas.getContext("2d");
 
 const scene = new Scene();
@@ -50,7 +54,9 @@ let trouble = "";
 let colours = null;
 let pace = 0;
 let frameCost = 0;
+let timings = [];
 let lastTimed = 0;
+let placedFor = "";
 
 // Private, link-local and Tailscale addresses: things on our own networks sit closer in.
 const isLocal = (host) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.|f[cde])/i.test(host);
@@ -158,6 +164,15 @@ export function renderHero(snapshot) {
   const running = live.filter((node) => node.side === "left" && node.tone !== "off").length;
   const peers = live.filter((node) => node.side === "right").length;
   setText(meta, `${running} container${running === 1 ? "" : "s"} up   ${peers} peer${peers === 1 ? "" : "s"}`);
+
+  // The corner readout: what the whole machine moves, and who has been moving the most of it lately.
+  const network = snapshot.network ?? {};
+  setText(readout.in, network.rx_bps == null ? "-" : formatRate(network.rx_bps));
+  setText(readout.out, network.tx_bps == null ? "-" : formatRate(network.tx_bps));
+  // Only things moving data right now can be named; among them, the one that has moved most lately.
+  const busiest = live.reduce((best, node) => (node.rate > 1000 && node.busy > (best?.busy ?? 0) ? node : best), null);
+  setText(readout.busiest, busiest?.label ?? "-");
+  readout.busiest.title = busiest ? `${busiest.label}  ${busiest.detail}` : "";
 
   // Trouble starting or ending anywhere, or a labelled thing going away, cannot wait for the next round of labels.
   const troubled = live.filter((node) => node.tone === "warn" || node.tone === "crit").map((node) => node.id + node.tone).join();
@@ -360,23 +375,16 @@ function drawBundle(g, node) {
   context.setLineDash([]);
 }
 
-// A dipole-like halo around the core. It carries no network data: its brightness is processor load.
-function drawHalo(g, now) {
-  context.strokeStyle = colours.blue.css;
-  context.lineWidth = g.ratio;
-  const reach = Math.min(g.width / 2 - g.line, g.fieldX * 1.7);
-  for (let k = 1; k <= 7; k += 1) {
-    // Each loop leaves near one pole and returns near the other, wider and taller than the last.
-    const breathe = calm ? 1 : 1 + 0.03 * Math.sin(now / 1700 + k);
-    const wide = Math.min(reach, g.core * (1.1 + 0.75 * k)) * breathe;
-    const tall = g.core * (0.9 + 0.5 * k) * breathe;
-    context.globalAlpha = (0.05 + 0.3 * scene.load) * (1 - k / 10);
-    for (const side of [-1, 1]) {
-      context.beginPath();
-      context.moveTo(g.cx + side * g.core * 0.25, g.cy - g.core * 0.96);
-      context.bezierCurveTo(g.cx + side * wide, g.cy - tall, g.cx + side * wide, g.cy + tall, g.cx + side * g.core * 0.25, g.cy + g.core * 0.96);
-      context.stroke();
-    }
+// Puts the words that belong to places in the picture where those places are. Only needed when the
+// picture changes size.
+function placeLabels(g) {
+  const key = `${g.width}x${g.height}x${g.line}`;
+  if (key === placedFor) return;
+  placedFor = key;
+  nameLabel.style.top = `${(g.cy + g.core + g.line * 0.4) / g.ratio}px`;
+  for (const label of ringLabels) {
+    label.style.left = `${g.cx / g.ratio}px`;
+    label.style.top = `${(g.cy + g.fieldY * Number(label.dataset.ring)) / g.ratio}px`;
   }
 }
 
@@ -465,7 +473,7 @@ function draw(now, elapsed) {
   context.setTransform(1, 0, 0, 1, 0, 0);
   context.clearRect(0, 0, g.width, g.height);
   context.lineCap = "round";
-  nameLabel.style.top = `${(g.cy + g.core + g.line * 0.4) / g.ratio}px`;
+  placeLabels(g);
 
   // Two faint orbits show where the near and far things sit.
   context.globalCompositeOperation = "source-over";
@@ -482,6 +490,7 @@ function draw(now, elapsed) {
   context.setLineDash([]);
 
   scene.step(elapsed, calm);
+  tendField(g, scene.drift, scene.load, elapsed, colours);
   for (const node of scene.nodes.values()) {
     node.x = g.cx + Math.cos(node.angle) * g.fieldX * node.ring;
     node.y = g.cy + Math.sin(node.angle) * g.fieldY * node.ring;
@@ -509,7 +518,6 @@ function draw(now, elapsed) {
   }
 
   context.globalCompositeOperation = "lighter";
-  drawHalo(g, now);
   for (const node of scene.nodes.values()) drawBundle(g, node);
   drawCore(g);
   drawEndpoints(g);
@@ -535,10 +543,19 @@ function frame(now) {
   draw(now, elapsed);
   // Reading one pixel back makes the browser finish the frame, so the clock sees its real cost.
   context.getImageData(0, 0, 1, 1);
-  const cost = performance.now() - started;
-  frameCost = frameCost ? frameCost + (cost - frameCost) * 0.4 : cost;
-  if (pace < RATES.length - 1 && frameCost > 1000 / RATES[pace] / 3) pace += 1;
-  else if (pace > 0 && frameCost < 1000 / RATES[pace - 1] / 4) pace -= 1;
+  settleField();
+  // The middle one of the last three timings is what counts: a single slow frame (the browser
+  // tidying its memory, a new picture of the field landing) must not change the pace by itself.
+  // Nothing is decided before there are three, which also keeps a busy start-up out of it.
+  timings = [...timings, performance.now() - started].slice(-3);
+  frameCost = [...timings].sort((a, b) => a - b)[Math.floor((timings.length - 1) / 2)];
+  if (timings.length < 3) {
+    // Too early to judge.
+  } else if (pace < RATES.length - 1 && frameCost > 1000 / RATES[pace] / 3) {
+    pace += 1;
+  } else if (pace > 0 && frameCost < 1000 / RATES[pace - 1] / 4) {
+    pace -= 1;
+  }
   // Kept on the element, where they are easy to inspect.
   canvas.dataset.frameMs = frameCost.toFixed(1);
   canvas.dataset.fps = String(RATES[pace]);

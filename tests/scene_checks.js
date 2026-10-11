@@ -86,13 +86,14 @@ check("1 Mbps is half", near(intensity(1e6), 0.5, 1e-9));
       run(scene, clock, (second + 1) * 1000, frameMs);
     }
     const a = scene.nodes.get("c:a");
-    result.push([a.level, a.flow, a.travel, a.warn, a.alpha, scene.load, scene.spin]);
+    result.push([a.level, a.flow, a.travel, a.warn, a.alpha, scene.load, scene.spin, scene.drift]);
   }
   // Travel and spin are sums of small steps, so they differ a little with step size (never in speed
   // once things settle); the springs must not differ at all.
   const drift = (index) => Math.max(...result.slice(1).map((row) => Math.abs(row[index] - result[0][index])));
   check("dash travel is close at any frame rate", drift(2) < 2 && Math.abs(result[0][2]) > 100, `${drift(2)} px of ${result[0][2]}`);
   check("globe turn is close at any frame rate", drift(6) < 0.01, `${drift(6)} rad of ${result[0][6]}`);
+  check("field turn is close at any frame rate", drift(7) < 0.0005 && result[0][7] > 0.1, `${drift(7)} rad of ${result[0][7]}`);
   const springs = Math.max(...result.slice(1).map((row) => Math.max(...[0, 1, 3, 4, 5].map((index) => Math.abs(row[index] - result[0][index])))));
   check("springs are exact at any frame rate", springs < 1e-9, `${springs}`);
 }
@@ -109,6 +110,8 @@ for (const [label, frame] of [["60 fps", () => 1000 / 60], ["20 fps", () => 50],
   let worstTravel = 0;
   let worstSpin = 0;
   let spinBackwards = false;
+  let worstDrift = 0;
+  let driftBefore = 0;
   let outOfRange = "";
   let notFinite = "";
   let before = new Map();
@@ -157,6 +160,10 @@ for (const [label, frame] of [["60 fps", () => 1000 / 60], ["20 fps", () => 50],
       worstSpin = Math.max(worstSpin, turned / elapsed);
       worstLoad = Math.max(worstLoad, Math.abs(scene.load - loadBefore) / elapsed / (4 / 2500));
       spinBefore = scene.spin;
+      const drifted = scene.drift - driftBefore;
+      if (drifted < 0) spinBackwards = true;
+      worstDrift = Math.max(worstDrift, drifted / elapsed);
+      driftBefore = scene.drift;
       loadBefore = scene.load;
       if (!Number.isFinite(scene.load) || !Number.isFinite(scene.spin) || scene.load < 0 || scene.load > 1) notFinite = "load or spin";
     });
@@ -167,6 +174,7 @@ for (const [label, frame] of [["60 fps", () => 1000 / 60], ["20 fps", () => 50],
   }
   check(`${label}: dashes never jump`, worstTravel <= 0.09 + 1e-12, `${worstTravel} px/ms`);
   check(`${label}: globe never jumps or turns back`, !spinBackwards && worstSpin <= 0.00145 + 1e-12, `${worstSpin}`);
+  check(`${label}: field never jumps or turns back`, worstDrift <= 0.000036 + 1e-12 && scene.drift > 0, `${worstDrift}`);
   check(`${label}: load never jumps`, worstLoad <= 1, `${worstLoad}`);
   check(`${label}: all values in range`, outOfRange === "", outOfRange);
   check(`${label}: all values finite`, notFinite === "", notFinite);
@@ -396,7 +404,7 @@ for (const [label, frame] of [["60 fps", () => 1000 / 60], ["20 fps", () => 50],
   scene.step(1000, true);
   const a = scene.nodes.get("c:a");
   check("still mode goes straight to the goal", a.alpha === 1 && a.level === 0.5 && scene.load === 0.6);
-  check("still mode does not flow or turn", a.travel === 0 && scene.spin === 0);
+  check("still mode does not flow or turn", a.travel === 0 && scene.spin === 0 && scene.drift === 0);
   scene.update([container("a", 1e6, 0)], 0.6, 1000);
   scene.step(1000, true);
   check("still mode forgets at once", !scene.nodes.has("c:b"));
