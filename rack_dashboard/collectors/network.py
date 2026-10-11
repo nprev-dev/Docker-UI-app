@@ -131,6 +131,10 @@ def list_sockets(with_processes: bool = False) -> str:
     return subprocess.run(["ss", "-H", "-O", flags], capture_output=True, text=True, timeout=3, check=True).stdout
 
 
+def read_sockets(with_processes: bool = False) -> list[Sock]:
+    return parse_sockets(list_sockets(with_processes))
+
+
 # --- sockets --------------------------------------------------------------------
 
 
@@ -426,10 +430,13 @@ class NetworkCollector:
         probes_enabled: bool = True,
         route: Callable[[], tuple[str | None, str | None]] = read_route,
         link: Callable[[str], dict | None] = read_link,
-        sockets: Callable[[bool], str] = list_sockets,
+        sockets: Callable[[bool], list[Sock]] = read_sockets,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         boot: Callable[[], tuple[str, float]] = read_boot,
+        resolvers: Callable[[], list[str]] = probes.resolvers,
+        pinger: Callable[[str, float], probes.Pinger] = lambda host, interval: probes.Pinger(host, interval=interval),
+        talkers: bool = True,
     ):
         self._state = state
         self._forced_iface = iface
@@ -442,6 +449,11 @@ class NetworkCollector:
         self._route = route
         self._link = link
         self._sockets = sockets
+        self._resolvers = resolvers
+        self._new_pinger = pinger
+        # Not every system counts the bytes of each connection; without that there is no telling
+        # who is being talked to most.
+        self._count_talkers = talkers
         self._monotonic = monotonic
 
         self._rx: deque[int] = deque(maxlen=HISTORY)
@@ -517,15 +529,15 @@ class NetworkCollector:
     def _socket_info(self, now: float) -> dict:
         try:
             if self._names_at is None or now - self._names_at >= NAMES_EVERY:
-                self._names = listener_names(parse_sockets(self._sockets(True)))
+                self._names = listener_names(self._sockets(True))
                 self._names_at = now
-            sockets = parse_sockets(self._sockets(False))
-        except (OSError, subprocess.SubprocessError):
+            sockets = self._sockets(False)
+        except Exception:  # noqa: BLE001 - the tool is missing, or the system will not say
             return {"sockets": None, "listening": None, "talkers": None}
         return {
             "sockets": socket_counts(sockets),
             "listening": listening(sockets, self._names),
-            "talkers": self._talkers.update(sockets, now),
+            "talkers": self._talkers.update(sockets, now) if self._count_talkers else None,
         }
 
     # --- probes -----------------------------------------------------------------
@@ -573,11 +585,11 @@ class NetworkCollector:
             current.stop()
             del self._pingers[role]
         if host:
-            self._pingers[role] = probes.Pinger(host, interval=interval)
+            self._pingers[role] = self._new_pinger(host, interval)
             self._pingers[role].start()
 
     def _time_dns(self) -> dict:
-        servers = probes.resolvers()
+        servers = self._resolvers()
         if not servers:
             self._dns_server = None
             raise RuntimeError("no resolver configured")

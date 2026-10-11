@@ -51,7 +51,65 @@ def test_echo_sends_a_request_and_times_the_matching_reply():
     assert rtt is not None and 0 <= rtt < 1000
     packet, address = sock.sent[0]
     assert address == ("192.0.2.1", 0)
-    assert struct.unpack("!BBHHH", packet[:8]) == (8, 0, 0, 0, 7)
+    kind, code, _, _, sequence = struct.unpack("!BBHHH", packet[:8])
+    assert (kind, code, sequence) == (8, 0, 7)
+    # macOS sends the packet untouched, so its checksum has to be right as it leaves us:
+    # a packet with a correct checksum sums to zero.
+    assert probes.checksum(packet) == 0
+
+
+def test_checksum_matches_a_known_packet():
+    # An echo request captured on a wire: type 8, checksum 0x4d56, id 1, sequence 5, payload "abcd..."
+    body = bytes.fromhex("0800000000010005") + b"abcdefghijklmnopqrstuvwabcdefghi"
+    filled = body[:2] + struct.pack("!H", probes.checksum(body)) + body[4:]
+    assert probes.checksum(filled) == 0
+    # Odd lengths are padded with a zero byte.
+    assert probes.checksum(b"\x01") == 0xFEFF
+
+
+def test_reply_is_recognised_with_or_without_its_ip_header():
+    # As a Mac delivered it: 20 bytes of IP header, then the echo reply (id 0x1234, sequence 7).
+    from_mac = bytes.fromhex("450018007dff0000400100007f0000017f000001" "000011cb12340007") + b"rack-dashboard--"
+    assert probes.is_reply(from_mac, 7) and not probes.is_reply(from_mac, 8)
+    # As Linux delivers it: the echo reply alone.
+    assert probes.is_reply(from_mac[20:], 7)
+    # An IP header with options is longer than 20 bytes; its length is in the first byte.
+    with_options = bytes([0x46]) + from_mac[1:20] + b"\x00" * 4 + from_mac[20:]
+    assert probes.is_reply(with_options, 7)
+
+
+@pytest.mark.parametrize("data", [b"", b"\x45", bytes.fromhex("4500"), bytes.fromhex("0000000000"), bytes.fromhex("0800000012340007"), bytes.fromhex("0300000000000007")])
+def test_things_that_are_not_our_reply(data):
+    assert not probes.is_reply(data, 7)
+
+
+def test_pinger_can_use_another_way_to_ping():
+    # Windows has no ping socket; there the pinger is given the system's own service instead.
+    class Handle:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    opened, asked = [], []
+
+    def open_handle():
+        opened.append(Handle())
+        return opened[-1]
+
+    def other_echo(handle, host, sequence, timeout):
+        asked.append((handle, host, sequence, timeout))
+        return None if sequence == 2 else 4.2
+
+    pinger = probes.Pinger("192.0.2.9", interval=5, timeout=1, open_socket=open_handle, echo=other_echo)
+    pinger.ping_once()
+    pinger.ping_once()
+    pinger.ping_once()
+
+    assert list(pinger.results) == [4.2, None, 4.2]
+    assert [call[1:] for call in asked] == [("192.0.2.9", 1, 1), ("192.0.2.9", 2, 1), ("192.0.2.9", 3, 1)]
+    # A lost ping makes it open afresh, whatever it is that gets opened.
+    assert len(opened) == 2 and opened[0].closed and not opened[1].closed
 
 
 def test_echo_skips_late_replies_to_earlier_pings():

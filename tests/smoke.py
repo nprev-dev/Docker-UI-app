@@ -38,6 +38,10 @@ def main(argv: list[str]) -> int:
     if snapshot is None:
         print("FAIL  the server never answered with a reading")
         return 1
+    # Rates and load need two samples, and some systems take a while to name their hardware.
+    wait = float(argv[argv.index("--settle") + 1]) if "--settle" in argv else 12.0
+    time.sleep(wait)
+    snapshot = json.loads(fetch(f"{base}/api/snapshot")[1])
 
     problems = []
     for path, marker in (("/", b"<title>"), ("/app.js", b"import"), ("/style.css", b"--bg"), ("/fonts/IBMPlexMono-Regular.woff2", b"wOF2")):
@@ -48,7 +52,7 @@ def main(argv: list[str]) -> int:
         if status != 200 or marker not in body:
             problems.append(f"{path} is missing or wrong ({status})")
 
-    print(f"host {snapshot.get('host')!r}, {len(snapshot.get('events') or [])} log lines")
+    print(f"host {snapshot.get('host')!r}, system {snapshot.get('system')}, {len(snapshot.get('events') or [])} log lines")
     for name in ("containers", "network", "hardware"):
         section = snapshot.get(name) or {}
         state = "ok" if section.get("ok") else f"NOT OK: {section.get('error')}"
@@ -57,11 +61,17 @@ def main(argv: list[str]) -> int:
             problems.append(f"{name} is required here but reports: {section.get('error')}")
     network, hardware = snapshot.get("network") or {}, snapshot.get("hardware") or {}
     link = network.get("link") or {}
-    print("  link", link.get("name"), link.get("state"), "| gateway known:", bool(network.get("gateway")), "| listening ports:", len(network.get("listening") or []),
-          "| talkers:", len(network.get("talkers") or []), "| pings:", [(p.get("name"), p.get("last") is not None, p.get("error")) for p in network.get("ping") or []])
+    listening = network.get("listening") or []
+    print("  link", link.get("name"), link.get("state"), link.get("speed"), "| address known:", bool(link.get("address")), "| gateway known:", bool(network.get("gateway")),
+          "| rates known:", network.get("rx_bps") is not None, "| sockets:", network.get("sockets"))
+    print("  listening ports:", len(listening), "named:", sum(1 for port in listening if port.get("who")), [f"{p['port']}/{p['proto']} {p.get('who')}" for p in listening[:5]],
+          "| talkers:", network.get("talkers") if network.get("talkers") is None else len(network["talkers"]))
+    print("  pings:", [(p.get("name"), p.get("last"), p.get("error")) for p in network.get("ping") or []], "| dns:", network.get("dns"), "| wan known:", bool((network.get("wan") or {}).get("ip")))
     inventory = hardware.get("inventory") or {}
-    print("  cpu", (inventory.get("cpu") or {}).get("model"), "| ram known:", bool(inventory.get("ram_bytes")), "| disks:", len(inventory.get("disks") or []),
-          "| temps:", len(hardware.get("temps") or []), "| wall power known:", (hardware.get("power") or {}).get("wall_w") is not None)
+    power = hardware.get("power") or {}
+    print("  board", inventory.get("board"), "| cpu", inventory.get("cpu"), "| ram:", inventory.get("ram_bytes"), "| disks:", [(d.get("name"), d.get("kind"), d.get("model")) for d in inventory.get("disks") or []])
+    print("  cpu load:", power.get("cpu_load"), "| cpu W:", power.get("cpu_w"), "measured" if power.get("cpu_measured") else "estimated", "| wall W:", power.get("wall_w"),
+          "| temps:", len(hardware.get("temps") or []), "| ups:", hardware.get("ups"))
 
     for problem in problems:
         print("FAIL ", problem)

@@ -43,11 +43,15 @@ jobs:
       - run: python -m pip install .
       - name: Start the dashboard and ask it for a reading
         shell: bash
+        env:
+          # Pings and look-ups are tried for real; the speed test would move 75 MB for nothing.
+          DASH_SPEEDTEST_HOURS: "0"
         run: |
           cd "$RUNNER_TEMP"
           rack-dashboard --version
           rack-dashboard --port 8787 > server.log 2>&1 &
-          python "$GITHUB_WORKSPACE/tests/smoke.py" http://127.0.0.1:8787 || { echo "--- server log"; cat server.log; exit 1; }
+          # Every system must be able to read its network and hardware. Docker is only there on some.
+          python "$GITHUB_WORKSPACE/tests/smoke.py" http://127.0.0.1:8787 --require network,hardware || { echo "--- server log"; cat server.log; exit 1; }
 
   install:
     name: install script, ubuntu-latest
@@ -57,6 +61,8 @@ jobs:
       # From GitHub, exactly as the readme says, but at the commit being tested.
       - run: sh install.sh --no-service --ref "$GITHUB_SHA"
       - name: Start what was installed and ask it for a reading
+        env:
+          DASH_SPEEDTEST_HOURS: "0"
         run: |
           cd "$RUNNER_TEMP"
           ~/.local/bin/rack-dashboard --version

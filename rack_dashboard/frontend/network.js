@@ -280,9 +280,11 @@ function renderListening(entries) {
   knownPorts = new Set(entries.map((entry) => `${entry.port}/${entry.proto}`));
 }
 
-function renderTalkers(talkers) {
+function renderTalkers(talkers, system) {
   if (!talkers?.length) {
-    f.talkers.replaceChildren(element("p", "line faint", talkers ? "-- quiet --" : "-- unavailable --"));
+    // Three different kinds of nothing: nobody is talking, this system cannot tell, or the reading failed.
+    const cannot = system?.missing?.includes("talkers") ? `-- not readable on ${system.name} --` : "-- unavailable --";
+    f.talkers.replaceChildren(element("p", "line faint", talkers ? "-- quiet --" : cannot));
     return;
   }
   f.talkers.replaceChildren(
@@ -299,7 +301,7 @@ function renderTalkers(talkers) {
 
 // --- Panel -------------------------------------------------------------------
 
-export function renderNetwork(data, interval) {
+export function renderNetwork(data, interval, system) {
   if (!data) return;
   const now = Date.now() / 1000;
   flow.step = interval || 1;
@@ -325,7 +327,7 @@ export function renderNetwork(data, interval) {
   renderSpeed(data.speedtest, now);
 
   renderListening(data.listening);
-  renderTalkers(data.talkers);
+  renderTalkers(data.talkers, system);
 }
 
 // The font scales with the window, so the graphs must be redrawn to stay on the character grid.

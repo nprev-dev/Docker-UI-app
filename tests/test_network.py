@@ -73,8 +73,8 @@ class Machine:
             raise self.ss_error
         if with_processes:
             self.name_lookups += 1
-            return self.ss_names
-        return self.ss
+        # The collector is handed sockets already read; here they come from text as `ss` prints it.
+        return mod.parse_sockets(self.ss_names if with_processes else self.ss)
 
     def tick(self, seconds=1.0, rx=0, tx=0):
         self.now += seconds
@@ -718,3 +718,42 @@ def test_close_saves_todays_total(machine, state, tmp_path):
     collector.close()
 
     assert json.loads((tmp_path / "state.json").read_text())["today"]["last_rx"] == 4_000
+
+
+# --- systems other than Linux -----------------------------------------------------------------------
+
+
+def test_system_that_cannot_count_bytes_per_connection(machine, state):
+    collector = make(machine, state, talkers=False)
+    collector.collect()
+    machine.tick()
+    result = collector.collect()
+
+    # None, not an empty list: "cannot be told here" is not the same as "nobody is talking".
+    assert result["talkers"] is None
+    assert result["listening"] and result["sockets"]["tcp_estab"] > 0
+
+
+def test_name_servers_and_ping_can_come_from_elsewhere(probing, monkeypatch):
+    # Windows has neither a resolv.conf nor a ping socket; the collector is handed other ways.
+    made = []
+
+    def pinger(host, interval):
+        made.append((host, interval))
+        return FakePinger(host, interval=interval)
+
+    timed = []
+    monkeypatch.setattr(mod.probes, "dns_time", lambda server, name: timed.append((server, name)) or 0.4)
+    collector = probing(resolvers=lambda: ["203.0.113.53", "9.9.9.9"], pinger=pinger, dns_name="example.org")
+
+    collector.collect()
+    assert made == [("192.168.1.1", 1.0), ("1.1.1.1", 30.0)]
+    assert collector._time_dns() == {"ms": 0.4} and timed == [("203.0.113.53", "example.org")]
+
+
+def test_no_name_server_known(probing):
+    collector = probing(resolvers=lambda: [])
+    collector.collect()
+
+    with pytest.raises(RuntimeError, match="no resolver"):
+        collector._time_dns()

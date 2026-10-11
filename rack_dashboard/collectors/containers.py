@@ -7,9 +7,9 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable
 
+from rack_dashboard.collectors import system
 from rack_dashboard.collectors.util import brief
 
 # Only these states have live counters; asking for stats on the rest is wasted work.
@@ -39,11 +39,7 @@ def socket_candidates() -> list[str]:
     if explicit:
         # An explicit choice is final; quietly using another daemon would show the wrong machine.
         return [explicit]
-    return [
-        "unix:///var/run/docker.sock",
-        # Docker Desktop for Linux keeps its socket in the user's home instead.
-        f"unix://{Path.home()}/.docker/desktop/docker.sock",
-    ]
+    return system.docker_sockets()
 
 
 def connect() -> Any:
