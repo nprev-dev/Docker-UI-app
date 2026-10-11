@@ -497,9 +497,9 @@ def test_explicit_docker_host_is_the_only_candidate(monkeypatch):
     assert mod.socket_candidates() == ["unix:///tmp/custom.sock"]
 
 
-def test_default_candidates_cover_engine_and_desktop(monkeypatch):
+def test_default_candidates_are_those_of_the_system_it_runs_on(monkeypatch):
     monkeypatch.delenv("DOCKER_HOST", raising=False)
-    candidates = mod.socket_candidates()
 
-    assert candidates[0] == "unix:///var/run/docker.sock"
-    assert candidates[1].endswith("/.docker/desktop/docker.sock")
+    # Which places those are for each system is checked in test_systems.py.
+    assert mod.socket_candidates() == mod.system.docker_sockets()
+    assert len(mod.socket_candidates()) == 2
