@@ -1,0 +1,25 @@
+name: once
+on:
+  push:
+    branches: ["ci/**"]
+permissions:
+  contents: read
+jobs:
+  speed:
+    name: one speed test, ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: python -m pip install .
+      - shell: bash
+        run: |
+          cd "$RUNNER_TEMP"
+          rack-dashboard --port 8787 > server.log 2>&1 &
+          python "$GITHUB_WORKSPACE/tests/smoke.py" http://127.0.0.1:8787 --settle 70 --require network,hardware

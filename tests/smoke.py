@@ -67,6 +67,10 @@ def main(argv: list[str]) -> int:
     print("  listening ports:", len(listening), "named:", sum(1 for port in listening if port.get("who")), [f"{p['port']}/{p['proto']} {p.get('who')}" for p in listening[:5]],
           "| talkers:", network.get("talkers") if network.get("talkers") is None else len(network["talkers"]))
     print("  pings:", [(p.get("name"), p.get("last"), p.get("error")) for p in network.get("ping") or []], "| dns:", network.get("dns"), "| wan known:", bool((network.get("wan") or {}).get("ip")))
+    speed = network.get("speedtest") or {}
+    last = speed.get("last") or {}
+    print("  speed test:", "on" if speed.get("enabled") else "off", "| down Mbps:", last.get("down_bps") and round(last["down_bps"] / 1e6, 1),
+          "| up Mbps:", last.get("up_bps") and round(last["up_bps"] / 1e6, 1), "| error:", speed.get("error"))
     inventory = hardware.get("inventory") or {}
     power = hardware.get("power") or {}
     print("  board", inventory.get("board"), "| cpu", inventory.get("cpu"), "| ram:", inventory.get("ram_bytes"), "| disks:", [(d.get("name"), d.get("kind"), d.get("model")) for d in inventory.get("disks") or []])

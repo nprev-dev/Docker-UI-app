@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import time
 from collections import namedtuple
 from types import SimpleNamespace
@@ -510,3 +511,32 @@ def test_slow_answers_are_remembered_for_a_while():
     assert ask() == 1
     now[0] = 110.0
     assert ask() == 2 and asked == [100.0, 110.0]
+
+
+# --- On the real thing --------------------------------------------------------------------------
+# Everything above reads samples. These ask the system itself, so each runs only where it belongs;
+# the test machines on GitHub are where that happens. A machine pinging itself leaves no network.
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="asks Windows itself")
+def test_windows_answers_its_own_ping():
+    handle = windows.IcmpHandle()
+    try:
+        took = windows.echo(handle, "127.0.0.1", 1, 1.0)
+    finally:
+        handle.close()
+
+    assert took is not None and 0 <= took < 1000
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="asks macOS itself")
+def test_macos_answers_its_own_ping():
+    from rack_dashboard.collectors import probes
+
+    sock = probes.open_icmp()
+    try:
+        took = probes.echo(sock, "127.0.0.1", 1, 1.0)
+    finally:
+        sock.close()
+
+    assert took is not None and 0 <= took < 1000

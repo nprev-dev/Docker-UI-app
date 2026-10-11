@@ -74,6 +74,8 @@ jobs:
           mkdir -p ~/.config/rack-dashboard
           # The speed test would move 75 MB for nothing.
           printf '%s\n' '# kept from an earlier install' 'DASH_SPEEDTEST_HOURS=0' > ~/.config/rack-dashboard/env
+      - name: The readme's way of passing options
+        run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --help | grep -e "--lan"
       # Piped from GitHub, exactly as the readme says, but at the commit being tested.
       - name: Install
         run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --ref "$GITHUB_SHA"
@@ -115,6 +117,10 @@ jobs:
           New-Item -ItemType Directory -Force "$env:APPDATA\rack-dashboard" | Out-Null
           # Written the way Notepad and Windows PowerShell write: with a marker in front of the first line.
           Set-Content -Encoding UTF8 "$env:APPDATA\rack-dashboard\env" "DASH_SPEEDTEST_HOURS=0", "# kept from an earlier install"
+      - name: The readme's way of passing options, from the command prompt
+        shell: cmd
+        run: |
+          powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/%GITHUB_REPOSITORY%/%GITHUB_SHA%/install.ps1))) -Help" | findstr /C:"-Lan"
       # Fetched and run as one piece of text, as the readme says, in the PowerShell every Windows
       # has. The text is that of the commit being tested, told to install that same commit.
       - name: Install

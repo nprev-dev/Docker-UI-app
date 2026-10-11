@@ -173,7 +173,7 @@ function renderCooling(data, system) {
   }
   // On Linux the board's own fan and voltage chip needs a kernel driver that is not loaded by
   // default. Other systems do not let ordinary programs read it at all.
-  if (unreadable) lines.push(element("p", "line faint", `-- not readable on ${system.name} --`));
+  if (unreadable) lines.push(element("p", "line faint", `board  unreadable on ${system.name}`));
   else if (!data.board_sensors) lines.push(element("p", "line faint", "board  driver not loaded"));
   fill(f.cooling, lines);
 }
