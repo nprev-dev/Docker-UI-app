@@ -68,97 +68,135 @@ jobs:
           sudo loginctl enable-linger "$USER"
           echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
           for _ in $(seq 20); do [ -S "/run/user/$(id -u)/bus" ] && break; sleep 1; done
-      - name: Leave a settings file behind, as an earlier install would have
-        run: |
-          echo "SETTINGS=$HOME/.config/rack-dashboard/env" >> "$GITHUB_ENV"
-          mkdir -p ~/.config/rack-dashboard
-          # The speed test would move 75 MB for nothing.
-          printf '%s\n' '# kept from an earlier install' 'DASH_SPEEDTEST_HOURS=0' > ~/.config/rack-dashboard/env
+      - name: Note what is on the machine before
+        run: python3 tests/footprint.py "$RUNNER_TEMP/note.json"
       - name: The readme's way of passing options
         run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --help | grep -e "--lan"
-      # Piped from GitHub, exactly as the readme says, but at the commit being tested.
-      - name: Install
-        run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --ref "$GITHUB_SHA"
+      # Piped from GitHub, exactly as the readme says, but at the commit being tested. Not started
+      # yet: a first start runs a speed test, which would move 75 MB for nothing.
+      - name: Install into a folder that is not there yet
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --ref "$GITHUB_SHA" --no-service
+          ls -A ~/rack-dashboard
+          test -x ~/rack-dashboard/bin/rack-dashboard
+          test -x ~/rack-dashboard/uninstall.sh
+          ~/rack-dashboard/bin/rack-dashboard --version
+          echo "DASH_SPEEDTEST_HOURS=0" >> ~/rack-dashboard/env
+      - name: Install again, this time started by the system
+        run: sh install.sh --ref "$GITHUB_SHA"
       - name: Ask what the system started for a reading
         run: python3 tests/smoke.py http://127.0.0.1:8787 --require network,hardware
+      - name: Nothing but the start-up entry is outside the folder
+        run: |
+          python3 tests/footprint.py "$RUNNER_TEMP/note.json" --allow ~/rack-dashboard \
+            --allow ~/.config/systemd/user/rack-dashboard.service --allow ~/.config/systemd/user/default.target.wants/rack-dashboard.service \
+            --allow ~/Library/LaunchAgents/io.github.nprev-dev.rack-dashboard.plist
+          test -s ~/rack-dashboard/rack-dashboard.log
+          test -s ~/rack-dashboard/state.json
       - name: Install again over the running one, on another port and open to the network
         run: |
           sh install.sh --ref "$GITHUB_SHA" --port 8790 --lan | tee again.txt
           grep -q "From other machines" again.txt
-          grep -q "kept from an earlier install" "$SETTINGS"
-          grep -qx "DASH_SPEEDTEST_HOURS=0" "$SETTINGS"
-          grep -qx "DASH_PORT=8790" "$SETTINGS"
-          grep -qx "DASH_HOST=0.0.0.0" "$SETTINGS"
+          grep -qx "DASH_SPEEDTEST_HOURS=0" ~/rack-dashboard/env
+          grep -qx "DASH_PORT=8790" ~/rack-dashboard/env
+          grep -qx "DASH_HOST=0.0.0.0" ~/rack-dashboard/env
           if curl -fs http://127.0.0.1:8787/api/snapshot > /dev/null; then echo "still answering on the old port"; exit 1; fi
       - name: Ask it again, where it now listens
         run: python3 tests/smoke.py http://127.0.0.1:8790 --settle 3 --require network,hardware
-      - name: Uninstall
+      - name: What it logged
+        if: always()
+        run: cat ~/rack-dashboard/rack-dashboard.log || journalctl --user -u rack-dashboard --no-pager -n 80 || true
+      - name: Uninstall with the script in the folder, and find nothing left
         run: |
-          sh install.sh --uninstall
-          sleep 3
+          sh ~/rack-dashboard/uninstall.sh
           if curl -fs http://127.0.0.1:8790/api/snapshot > /dev/null; then echo "still running"; exit 1; fi
-          test ! -e ~/.local/bin/rack-dashboard
+          test ! -e ~/rack-dashboard
           test ! -e ~/.config/systemd/user/rack-dashboard.service
           test ! -e ~/Library/LaunchAgents/io.github.nprev-dev.rack-dashboard.plist
-          test -f "$SETTINGS"
-      - name: What it logged
-        if: failure()
-        run: |
-          cat ~/Library/Logs/rack-dashboard.log 2>/dev/null || journalctl --user -u rack-dashboard --no-pager -n 80 || true
+          python3 tests/footprint.py "$RUNNER_TEMP/note.json"
+      - name: Uninstalling what is not there is not an error
+        run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_SHA/install.sh" | sh -s -- --uninstall
 
   install-windows:
     name: install script, windows-latest
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Leave a settings file behind, as an earlier install would have
-        shell: powershell
-        run: |
-          New-Item -ItemType Directory -Force "$env:APPDATA\rack-dashboard" | Out-Null
-          # Written the way Notepad and Windows PowerShell write: with a marker in front of the first line.
-          Set-Content -Encoding UTF8 "$env:APPDATA\rack-dashboard\env" "DASH_SPEEDTEST_HOURS=0", "# kept from an earlier install"
+      - name: Note what is on the machine before
+        run: python tests/footprint.py "$env:RUNNER_TEMP\note.json"
       - name: The readme's way of passing options, from the command prompt
         shell: cmd
         run: |
           powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm https://raw.githubusercontent.com/%GITHUB_REPOSITORY%/%GITHUB_SHA%/install.ps1))) -Help" | findstr /C:"-Lan"
+      # Not started yet: a first start runs a speed test, which would move 75 MB for nothing.
+      - name: Install into a folder that is not there yet
+        shell: powershell
+        run: |
+          & ([scriptblock]::Create((Invoke-RestMethod "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/install.ps1"))) -Ref $env:GITHUB_SHA -NoStartup
+          Get-ChildItem -Force "$HOME\rack-dashboard" | ForEach-Object { $_.Name }
+          & "$HOME\rack-dashboard\bin\rack-dashboard.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "the command does not run" }
+          foreach ($name in "uninstall.cmd", "uninstall.ps1", ".rack-dashboard", "env") {
+            if (-not (Test-Path "$HOME\rack-dashboard\$name")) { throw "the folder lacks $name" }
+          }
+          # Written the way Notepad and Windows PowerShell write: with a marker in front of the first line.
+          Set-Content -Encoding UTF8 "$HOME\rack-dashboard\env" "DASH_SPEEDTEST_HOURS=0", "# kept from an earlier install"
       # Fetched and run as one piece of text, as the readme says, in the PowerShell every Windows
       # has. The text is that of the commit being tested, told to install that same commit.
-      - name: Install
+      - name: Install again, this time started by Windows
         shell: powershell
         run: |
           $text = Invoke-RestMethod "https://raw.githubusercontent.com/$env:GITHUB_REPOSITORY/$env:GITHUB_SHA/install.ps1"
           $told = $text.Replace('[string]$Ref = "main"', '[string]$Ref = "' + $env:GITHUB_SHA + '"')
           if ($told -eq $text) { throw "the script no longer has the line this test changes" }
           $told | Invoke-Expression
+          foreach ($name in "UV_UNMANAGED_INSTALL", "UV_PYTHON_INSTALL_DIR", "UV_TOOL_DIR", "UV_TOOL_BIN_DIR") {
+            if ([Environment]::GetEnvironmentVariable($name)) { throw "$name was left set in this PowerShell" }
+          }
       - name: Ask what was started for a reading
         run: python tests/smoke.py http://127.0.0.1:8787 --require network,hardware
+      - name: Nothing but the start-up entry is outside the folder
+        shell: powershell
+        run: |
+          python tests/footprint.py "$env:RUNNER_TEMP\note.json" --allow "$HOME\rack-dashboard" --allow "registry:Run/RackDashboard"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          foreach ($name in "rack-dashboard.log", "state.json") {
+            if (-not (Test-Path "$HOME\rack-dashboard\$name")) { throw "the folder lacks $name" }
+          }
       - name: Install again over the running one, on another port and open to the network, in the newer PowerShell
         shell: pwsh
         run: |
           ./install.ps1 -Ref $env:GITHUB_SHA -Port 8790 -Lan
-          $settings = Get-Content "$env:APPDATA\rack-dashboard\env"
+          $settings = Get-Content "$HOME\rack-dashboard\env"
           $settings
           foreach ($line in "DASH_SPEEDTEST_HOURS=0", "# kept from an earlier install", "DASH_PORT=8790", "DASH_HOST=0.0.0.0") {
             if ($settings -notcontains $line) { throw "settings file lacks: $line" }
           }
           $entry = (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run").RackDashboard
           "start-up entry: $entry"
-          if ($entry -notlike '"*rack-dashboardw.exe"') { throw "no start-up entry" }
+          if ($entry -ne "`"$HOME\rack-dashboard\bin\rack-dashboardw.exe`"") { throw "the start-up entry is not the one expected" }
           try { $null = Invoke-WebRequest -TimeoutSec 3 http://127.0.0.1:8787/api/snapshot; $old = $true } catch { $old = $false }
           if ($old) { throw "still answering on the old port" }
       - name: Ask it again, where it now listens
         run: python tests/smoke.py http://127.0.0.1:8790 --settle 3 --require network,hardware
-      - name: Uninstall
-        shell: powershell
-        run: |
-          & ([scriptblock]::Create((Get-Content -Raw ./install.ps1))) -Uninstall
-          Start-Sleep 2
-          try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:8790/api/snapshot; $running = $true } catch { $running = $false }
-          if ($running) { throw "still running" }
-          if ((Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run").RackDashboard) { throw "start-up entry is still there" }
-          if (Test-Path "$HOME\.local\bin\rack-dashboard.exe") { throw "the command is still there" }
-          if (-not (Test-Path "$env:APPDATA\rack-dashboard\env")) { throw "the settings were removed" }
       - name: What it logged
         if: always()
         shell: powershell
-        run: Get-Content "$env:LOCALAPPDATA\rack-dashboard\rack-dashboard.log" -ErrorAction SilentlyContinue
+        run: Get-Content "$HOME\rack-dashboard\rack-dashboard.log" -ErrorAction SilentlyContinue
+      # The way a double-click does it, from inside the folder that is about to go.
+      - name: Uninstall with the script in the folder, and find nothing left
+        shell: cmd
+        run: |
+          cd /d "%USERPROFILE%\rack-dashboard"
+          call uninstall.cmd
+          if errorlevel 1 exit /b 1
+          cd /d "%GITHUB_WORKSPACE%"
+          if exist "%USERPROFILE%\rack-dashboard" (echo the folder is still there & exit /b 1)
+          reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v RackDashboard >nul 2>&1 && (echo the start-up entry is still there & exit /b 1)
+          python tests/footprint.py "%RUNNER_TEMP%\note.json"
+      - name: Uninstalling what is not there is not an error
+        shell: powershell
+        run: |
+          & ([scriptblock]::Create((Get-Content -Raw ./install.ps1))) -Uninstall
+          try { $null = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:8790/api/snapshot; $running = $true } catch { $running = $false }
+          if ($running) { throw "still running" }

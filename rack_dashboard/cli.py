@@ -6,9 +6,11 @@ import argparse
 import os
 import sys
 import threading
+import time
 import webbrowser
 
 from rack_dashboard import __version__, paths
+from rack_dashboard.logfile import CappedLog
 
 
 def port(text: str) -> int:
@@ -34,19 +36,22 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
 def load_settings(environ=os.environ) -> None:
     """Settings from the settings file become environment variables, unless one is set already:
     what was typed for this one run wins over what was written down for every run."""
-    for key, value in paths.read_settings(paths.config_dir() / "env").items():
+    for key, value in paths.read_settings(paths.settings_file()).items():
         environ.setdefault(key, value)
 
 
 def keep_a_log() -> None:
-    """Started without a window (as Windows does at sign-in) there is nowhere to print to.
-    What would have been printed goes to a file beside the saved data instead."""
-    if sys.stdout is not None and sys.stderr is not None:
+    """Started by the system instead of from a terminal, there is nobody to print to. What would
+    have been printed then goes to a log file: always when there is no window at all (as Windows
+    starts it at sign-in), and for an installed copy whenever its output is not a terminal."""
+    windowless = sys.stdout is None or sys.stderr is None
+    if not windowless and (paths.home() is None or sys.stdout.isatty()):
         return
     try:
-        folder = paths.data_dir()
-        folder.mkdir(parents=True, exist_ok=True)
-        log = open(folder / "rack-dashboard.log", "w", buffering=1, encoding="utf-8")
+        path = paths.log_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        log = CappedLog(path)
+        log.write(f"--- started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
     except OSError:
         log = open(os.devnull, "w")
     sys.stdout = sys.stderr = log
