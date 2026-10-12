@@ -121,12 +121,13 @@ try {
 if ($Wait) { Start-Sleep -Seconds 4 }
 '@
 
-# What a double-click runs. It steps out of the folder first, and reads no further line of itself
-# once the folder (and with it this file) is gone.
+# What a double-click runs. It steps out of the folder first. The "(goto)" ends this file's turn
+# while the rest of the line still runs: without it, Windows would come back to read the next line
+# of a file that has just been deleted, and complain.
 $RackDashboardUninstallerCmd = @'
 @echo off
 rem Removes Rack Dashboard: the start-up entry and this folder with everything in it.
-cd /d "%TEMP%" & powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1" -Wait & exit /b
+cd /d "%TEMP%" & (goto) 2>nul & powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1" -Wait
 '@
 
 # Runs a program and hands back its exit code and what it printed. Windows PowerShell treats
@@ -247,14 +248,20 @@ Installs Rack Dashboard for the person running it, into one folder. No administr
     # Older copies of Windows PowerShell do not offer the encryption GitHub asks for unless told to.
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
-    # uv is told through the environment where to put things. What was set before is put back
+    # uv is told through the environment where to put things, its temporary files included: those
+    # go into the folder as well and are removed at the end. What was set before is put back
     # afterwards, so that nothing lingers in the PowerShell this was pasted into.
     $bin = Join-Path $folder "bin"
+    $scratchFolder = Join-Path $folder ".tmp"
+    Remove-Item -LiteralPath $scratchFolder -Recurse -Force -ErrorAction SilentlyContinue
+    $null = New-Item -ItemType Directory -Force -Path $scratchFolder
     $told = @{
         UV_UNMANAGED_INSTALL = $bin
         UV_PYTHON_INSTALL_DIR = Join-Path $folder "python"
         UV_TOOL_DIR = Join-Path $folder "tools"
         UV_TOOL_BIN_DIR = $bin
+        TMP = $scratchFolder
+        TEMP = $scratchFolder
     }
     $before = @{}
     foreach ($key in $told.Keys) {
@@ -267,7 +274,7 @@ Installs Rack Dashboard for the person running it, into one folder. No administr
         $uv = Join-Path $bin "uv.exe"
         if (-not (Test-Path -LiteralPath $uv)) {
             Write-Host "Fetching uv (the installer tool) from astral.sh ..."
-            $scratch = Join-Path ([IO.Path]::GetTempPath()) ("uv-install-" + [guid]::NewGuid().ToString("N") + ".ps1")
+            $scratch = Join-Path $scratchFolder "uv-install.ps1"
             try {
                 try {
                     Invoke-WebRequest -UseBasicParsing -Uri "https://astral.sh/uv/install.ps1" -OutFile $scratch
@@ -294,6 +301,7 @@ Installs Rack Dashboard for the person running it, into one folder. No administr
         if ($installed.Code -ne 0) { throw "could not install ${name}:`n$($installed.Printed)" }
     } finally {
         foreach ($key in $told.Keys) { [Environment]::SetEnvironmentVariable($key, $before[$key], "Process") }
+        Remove-Item -LiteralPath $scratchFolder -Recurse -Force -ErrorAction SilentlyContinue
     }
     $command = Join-Path $bin "$name.exe"
     # The same program without a console window, for running in the background.

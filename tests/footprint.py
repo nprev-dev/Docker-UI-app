@@ -29,7 +29,7 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 def ours(path: str) -> bool:
     for part in path.replace("\\", "/").lower().split("/"):
-        if part in ("uv", "uv.exe", "uvx", "uvx.exe", "uvw.exe") or part.startswith("uv-") or any(name in part for name in OURS):
+        if part in ("uv", "uv.exe", "uv.zip", "uvx", "uvx.exe", "uvw.exe") or part.startswith("uv-") or any(name in part for name in OURS):
             return True
     return False
 

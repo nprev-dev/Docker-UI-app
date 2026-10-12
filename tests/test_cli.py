@@ -11,7 +11,7 @@ from rack_dashboard import cli
 def test_no_options_changes_nothing():
     options = cli.parse([])
 
-    assert options.host is None and options.port is None and options.open is False
+    assert options.host is None and options.port is None and options.open is False and options.service is False
 
 
 def test_options_are_read():
@@ -92,7 +92,6 @@ def test_with_a_window_nothing_is_redirected(tmp_path, monkeypatch):
     import sys
 
     monkeypatch.setattr(cli.paths, "log_file", lambda: tmp_path / "data" / "rack-dashboard.log")
-    monkeypatch.setattr(cli.paths, "home", lambda: None)
     before = (sys.stdout, sys.stderr)
 
     cli.keep_a_log()
@@ -116,26 +115,27 @@ class Screen:
         pass
 
 
-def test_an_installed_copy_started_by_the_system_logs_into_its_own_folder(tmp_path, monkeypatch):
+@pytest.mark.parametrize("terminal", [True, False])
+def test_started_by_the_system_it_keeps_a_log(tmp_path, monkeypatch, terminal):
     import sys
 
-    monkeypatch.setattr(cli.paths, "home", lambda: tmp_path)
     monkeypatch.setattr(cli.paths, "log_file", lambda: tmp_path / "rack-dashboard.log")
-    monkeypatch.setattr(sys, "stdout", Screen(terminal=False))
-    monkeypatch.setattr(sys, "stderr", Screen(terminal=False))
+    monkeypatch.setattr(sys, "stdout", Screen(terminal))
+    monkeypatch.setattr(sys, "stderr", Screen(terminal))
 
-    cli.keep_a_log()
+    cli.keep_a_log(service=True)
     print("listening")
     sys.stdout.close()
 
     assert (tmp_path / "rack-dashboard.log").read_text().splitlines()[1:] == ["listening"]
 
 
-def test_an_installed_copy_started_in_a_terminal_prints_there(tmp_path, monkeypatch):
+@pytest.mark.parametrize("terminal", [True, False])
+def test_started_by_hand_it_prints_wherever_its_output_was_pointed(tmp_path, monkeypatch, terminal):
     import sys
 
-    screen = Screen(terminal=True)
-    monkeypatch.setattr(cli.paths, "home", lambda: tmp_path)
+    # A terminal, or a file or pipe someone chose: either way that choice is theirs.
+    screen = Screen(terminal)
     monkeypatch.setattr(cli.paths, "log_file", lambda: tmp_path / "rack-dashboard.log")
     monkeypatch.setattr(sys, "stdout", screen)
     monkeypatch.setattr(sys, "stderr", screen)
@@ -143,6 +143,10 @@ def test_an_installed_copy_started_in_a_terminal_prints_there(tmp_path, monkeypa
     cli.keep_a_log()
 
     assert sys.stdout is screen and not (tmp_path / "rack-dashboard.log").exists()
+
+
+def test_the_start_up_entry_can_say_it_is_the_system(tmp_path):
+    assert cli.parse(["--service"]).service is True
 
 
 def test_a_log_that_cannot_be_written_does_not_stop_the_start(tmp_path, monkeypatch):

@@ -48,7 +48,7 @@ If the page loses its connection to the backend, every reading is dimmed so that
 
 ## Install
 
-Run this on the machine you want to watch, as the user who should run the dashboard. No root or administrator rights are needed, and everything stays in your own folders.
+Run this on the machine you want to watch, as the user who should run the dashboard. No root or administrator rights are needed.
 
 Linux and macOS:
 
@@ -64,16 +64,48 @@ powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/npr
 
 Then open <http://127.0.0.1:8787> on that machine.
 
-The script does three things:
+### What it puts on your machine
 
-- It fetches [uv](https://docs.astral.sh/uv/) from astral.sh if you do not have it. uv brings its own Python, so none has to be installed, and its installer adds the folder it uses (`~/.local/bin`) to your `PATH`.
-- It has uv install the dashboard from this repository, which gives you a `rack-dashboard` command.
-- It has the system start the dashboard by itself from then on:
-  - **Linux** (with systemd): a service for your user, which starts when the machine boots and comes back if it crashes. For that the script switches on "lingering" for your user (`loginctl enable-linger`), which is what lets a user's services run with nobody logged in.
-  - **macOS**: a launch agent in `~/Library/LaunchAgents`, which starts when you log in and comes back if it crashes.
-  - **Windows**: an entry among your start-up programs (Task Manager lists it under Startup apps), which starts when you sign in. It runs without a window.
+Everything goes into one folder: `rack-dashboard` in your home folder (`C:\Users\you\rack-dashboard` on Windows).
+
+```
+rack-dashboard/
+  uninstall.sh          removes all of it again (uninstall.cmd on Windows)
+  env                   your settings
+  state.json            the totals and history it has saved
+  rack-dashboard.log    what it printed
+  bin/                  the rack-dashboard command, and the tool that installed it
+  python/               its own Python
+  tools/                the program itself
+```
+
+That is about 160 MB, most of it Python. The dashboard brings its own, so none has to be installed and a system update cannot break it. Nothing is added to your `PATH`, no shell start-up file is touched, and nothing is left in a cache or a settings folder somewhere else.
+
+One thing has to live outside the folder, because every system keeps it in a place of its own: the entry that makes the dashboard start by itself.
+
+- **Linux** (with systemd): a service for your user, `~/.config/systemd/user/rack-dashboard.service`. It starts when the machine boots and comes back if it crashes. For that the script switches on "lingering" for your user (`loginctl enable-linger`), which is what lets a user's services run with nobody logged in.
+- **macOS**: a launch agent, `~/Library/LaunchAgents/io.github.nprev-dev.rack-dashboard.plist`. It starts when you log in and comes back if it crashes.
+- **Windows**: an entry among your start-up programs (Task Manager lists it under Startup apps). It starts when you sign in and runs without a window.
 
 On macOS and Windows the dashboard starts at login, not at boot. A machine that should come back on its own after a power cut needs automatic login switched on.
+
+The folder is put together by [uv](https://docs.astral.sh/uv/). The script fetches uv from astral.sh into the folder's `bin/`, and uv fetches Python and installs the dashboard from this repository.
+
+### Removing it
+
+Linux and macOS:
+
+```bash
+sh ~/rack-dashboard/uninstall.sh
+```
+
+Windows: double-click `uninstall.cmd` in the folder.
+
+This stops the dashboard, removes the start-up entry and deletes the folder with everything in it: the program, your settings, the saved history and the log. Nothing is left on the machine. To keep your settings or history, copy `env` and `state.json` out of the folder first.
+
+If you delete the folder by hand instead, the dashboard is gone as well. The start-up entry then stays behind and does nothing. Running the install command with `--uninstall` (Windows: `-Uninstall`) clears it.
+
+On Linux, systemd keeps its own notes of when the service was started and stopped in its journal, as it does for every service. Those are not the dashboard's to delete, and they age out by themselves.
 
 ### Opening it from other machines
 
@@ -89,11 +121,15 @@ powershell -ExecutionPolicy ByPass -c "& ([scriptblock]::Create((irm https://raw
 
 There is no login. Anyone who can reach the machine then sees your open ports, addresses and container names, so use this only on a network you trust. On Windows the firewall will ask whether to allow it the first time; until you say yes, other machines get no answer.
 
-### Other options, updating, removing
+### Other options and updating
 
-`--port N` (Windows: `-Port N`) listens on another port. `--no-service` (Windows: `-NoStartup`) installs the command and leaves starting it to you. Options go where `--lan` and `-Lan` are in the commands above.
+Options go where `--lan` and `-Lan` are in the commands above.
 
-Running the installer again updates to the newest version and keeps your settings. `--uninstall` (Windows: `-Uninstall`) removes the dashboard and its start-up entry. Your settings and saved data are left where they are; the script says where.
+- `--port N` (Windows: `-Port N`) listens on another port.
+- `--dir PATH` (Windows: `-Dir PATH`) uses another folder than `rack-dashboard` in your home folder.
+- `--no-service` (Windows: `-NoStartup`) installs it and leaves starting it to you.
+
+Running the install command again updates to the newest version. It finds the folder by itself and keeps your settings and history.
 
 ### On a monitor in the rack
 
@@ -132,15 +168,15 @@ So far Windows and macOS have only been run on GitHub's test machines. Those are
 
 ## Settings
 
-Settings live in one file, one `KEY=value` per line. The installer creates it and never overwrites it.
+Settings live in one file, `env` in the dashboard's folder, with one `KEY=value` per line. The installer creates it and never overwrites it. A change takes effect when the dashboard is restarted:
 
-| | Settings file | Restart after a change |
-| --- | --- | --- |
-| Linux | `~/.config/rack-dashboard/env` | `systemctl --user restart rack-dashboard` |
-| macOS | `~/.config/rack-dashboard/env` | `launchctl kickstart -k gui/$(id -u)/io.github.nprev-dev.rack-dashboard` |
-| Windows | `%APPDATA%\rack-dashboard\env` | run the installer again |
+| | Restart |
+| --- | --- |
+| Linux | `systemctl --user restart rack-dashboard` |
+| macOS | `launchctl kickstart -k gui/$(id -u)/io.github.nprev-dev.rack-dashboard` |
+| Windows | run the install command again |
 
-The same names work as environment variables, and one set that way wins over the file. Started by hand, that looks like `DASH_KWH_PRICE=0.14 rack-dashboard`. The address and port can also be given as `--host` and `--port`.
+The same names work as environment variables, and one set that way wins over the file. Started by hand, that looks like `DASH_KWH_PRICE=0.14 ~/rack-dashboard/bin/rack-dashboard`. The address and port can also be given as `--host` and `--port`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -160,7 +196,7 @@ The same names work as environment variables, and one set that way wins over the
 | `DASH_PSU_EFFICIENCY` | `0.87` | Power supply efficiency used for the wall figure |
 | `DASH_CPU_IDLE_W`, `DASH_CPU_MAX_W` | `25`, `142` | CPU power at idle and at full load, used only while it cannot be measured. The defaults suit a desktop processor; see [the power figures](#about-the-power-figures) |
 | `DASH_ROOM_SENSOR` | unset | Path of a file holding a temperature, as 1-wire and USB sensors provide |
-| `DASH_STATE` | see below | Where totals and history are kept between restarts |
+| `DASH_STATE` | `state.json` in the dashboard's folder | Where totals and history are kept between restarts |
 
 ## What it sends over the network
 
@@ -174,13 +210,9 @@ Everything on the page is read from the machine itself, except for the checks be
 
 `DASH_PROBES=0` turns all of it off, and `DASH_SPEEDTEST_HOURS=0` turns off only the speed test.
 
-The state file holds the daily totals, speed test history, the event log and your public IP address. It never leaves the machine. It is `state.json` in:
+The state file, `state.json` in the dashboard's folder, holds the daily totals, speed test history, the event log and your public IP address. It never leaves the machine.
 
-- Linux: `~/.local/share/rack-dashboard/`
-- macOS: `~/Library/Application Support/rack-dashboard/`
-- Windows: `%LOCALAPPDATA%\rack-dashboard\`
-
-What the dashboard prints goes to `journalctl --user -u rack-dashboard` on Linux, to `~/Library/Logs/rack-dashboard.log` on macOS, and to `rack-dashboard.log` beside the state file on Windows.
+What the dashboard prints goes to `rack-dashboard.log` in the same folder. The file is kept under about 1 MB; when it gets there, the older half is dropped.
 
 ## About the power figures
 
@@ -228,7 +260,7 @@ python3 -m venv .venv
 ./run.sh
 ```
 
-Run from a copy of the source like this, the dashboard keeps its state in a `data/` folder beside the code if there is one, which is why `data/` is in `.gitignore`.
+Run from a copy of the source like this, the dashboard keeps its state in a `data/` folder beside the code if there is one, which is why `data/` is in `.gitignore`. A copy installed with `pip` has no folder of its own; it keeps its settings and state where the system keeps such things (on Linux, `~/.config/rack-dashboard` and `~/.local/share/rack-dashboard`).
 
 The tests:
 

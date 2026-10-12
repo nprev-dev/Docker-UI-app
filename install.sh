@@ -225,7 +225,7 @@ start_launchd() {
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>test -x "\$0" || exit 0; exec "\$0"</string>
+        <string>test -x "\$0" || exit 0; exec "\$0" --service</string>
         <string>$dir/bin/$NAME</string>
     </array>
     <key>EnvironmentVariables</key>
@@ -262,7 +262,7 @@ Documentation=$REPO
 ConditionPathExists=$dir/bin/$NAME
 
 [Service]
-ExecStart="$dir/bin/$NAME"
+ExecStart="$dir/bin/$NAME" --service
 Environment="DASH_HOME=$dir"
 # The dashboard calls a few system tools (ss, nvidia-smi, upower); make sure they are found.
 Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -359,6 +359,11 @@ main() {
     write_uninstaller "$dir/uninstall.sh"
     chmod +x "$dir/uninstall.sh"
 
+    # Temporary files go into the folder as well, and are removed at the end.
+    rm -rf "$dir/.tmp"
+    mkdir -p "$dir/.tmp"
+    export TMPDIR="$dir/.tmp"
+
     # 1. uv, which fetches Python and the dashboard. The folder gets its own copy, put there
     #    without touching PATH or any shell file.
     uv_bin="$dir/bin/uv"
@@ -377,6 +382,8 @@ main() {
     say "Installing $NAME into $dir ..."
     "$uv_bin" python install "$PYTHON" --no-bin --no-registry --no-cache --quiet || fail "could not fetch Python $PYTHON"
     "$uv_bin" tool install --force --quiet --no-cache --managed-python --python "$PYTHON" "$source" || fail "could not install $NAME"
+    rm -rf "$dir/.tmp"
+    unset TMPDIR
     command_path="$dir/bin/$NAME"
     [ -x "$command_path" ] || fail "the $NAME command did not appear in $dir/bin"
     say "Installed $("$command_path" --version)"

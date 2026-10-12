@@ -93,6 +93,7 @@ jobs:
             --allow ~/Library/LaunchAgents/io.github.nprev-dev.rack-dashboard.plist
           test -s ~/rack-dashboard/rack-dashboard.log
           test -s ~/rack-dashboard/state.json
+          du -sh ~/rack-dashboard
       - name: Install again over the running one, on another port and open to the network
         run: |
           sh install.sh --ref "$GITHUB_SHA" --port 8790 --lan | tee again.txt
@@ -163,6 +164,7 @@ jobs:
           foreach ($name in "rack-dashboard.log", "state.json") {
             if (-not (Test-Path "$HOME\rack-dashboard\$name")) { throw "the folder lacks $name" }
           }
+          "{0:N0} MB in the folder" -f ((Get-ChildItem -Recurse -Force "$HOME\rack-dashboard" | Measure-Object Length -Sum).Sum / 1MB)
       - name: Install again over the running one, on another port and open to the network, in the newer PowerShell
         shell: pwsh
         run: |
@@ -183,14 +185,13 @@ jobs:
         if: always()
         shell: powershell
         run: Get-Content "$HOME\rack-dashboard\rack-dashboard.log" -ErrorAction SilentlyContinue
-      # The way a double-click does it, from inside the folder that is about to go.
+      # The way a double-click does it: a command prompt of its own, standing in the folder that
+      # is about to go.
       - name: Uninstall with the script in the folder, and find nothing left
         shell: cmd
         run: |
-          cd /d "%USERPROFILE%\rack-dashboard"
-          call uninstall.cmd
+          start "" /b /wait /d "%USERPROFILE%\rack-dashboard" cmd /c uninstall.cmd
           if errorlevel 1 exit /b 1
-          cd /d "%GITHUB_WORKSPACE%"
           if exist "%USERPROFILE%\rack-dashboard" (echo the folder is still there & exit /b 1)
           reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v RackDashboard >nul 2>&1 && (echo the start-up entry is still there & exit /b 1)
           python tests/footprint.py "%RUNNER_TEMP%\note.json"

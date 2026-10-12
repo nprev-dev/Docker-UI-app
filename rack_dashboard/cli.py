@@ -29,6 +29,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host", help="address to listen on (default 127.0.0.1; 0.0.0.0 lets other machines see the page)")
     parser.add_argument("--port", type=port, help="port to listen on (default 8787)")
     parser.add_argument("--open", action="store_true", help="open the page in the default browser once the server is up")
+    parser.add_argument("--service", action="store_true", help="started by the system, not by hand: write to the log file instead of printing")
     parser.add_argument("--version", action="version", version=f"{paths.NAME} {__version__}")
     return parser.parse_args(argv)
 
@@ -40,12 +41,13 @@ def load_settings(environ=os.environ) -> None:
         environ.setdefault(key, value)
 
 
-def keep_a_log() -> None:
-    """Started by the system instead of from a terminal, there is nobody to print to. What would
-    have been printed then goes to a log file: always when there is no window at all (as Windows
-    starts it at sign-in), and for an installed copy whenever its output is not a terminal."""
+def keep_a_log(service: bool = False) -> None:
+    """Started by the system instead of by hand, there is nobody to print to. What would have been
+    printed then goes to a log file: when the system says so (--service, which the start-up entry
+    the installers make passes), and whenever there is no window at all, as when Windows starts
+    it at sign-in. Started by hand, it prints wherever its output was pointed."""
     windowless = sys.stdout is None or sys.stderr is None
-    if not windowless and (paths.home() is None or sys.stdout.isatty()):
+    if not windowless and not service:
         return
     try:
         path = paths.log_file()
@@ -59,7 +61,7 @@ def keep_a_log() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     options = parse(argv)
-    keep_a_log()
+    keep_a_log(options.service)
     load_settings()
     # Settings travel as environment variables, because the app reads them once, as it is loaded.
     if options.host:
