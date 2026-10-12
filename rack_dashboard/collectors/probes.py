@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import ipaddress
+import os
 import random
 import socket
 import struct
@@ -11,9 +12,9 @@ import threading
 import time
 import urllib.request
 from collections import deque
-from typing import Callable
+from typing import Any, Callable
 
-from backend.collectors.util import brief
+from rack_dashboard.collectors.util import brief
 
 MB = 1000 * 1000
 
@@ -31,11 +32,37 @@ PING_PAYLOAD = b"rack-dashboard--"
 # --- ping ---------------------------------------------------------------------
 
 
+def checksum(data: bytes) -> int:
+    """The Internet checksum of a packet (RFC 1071)."""
+    if len(data) % 2:
+        data += b"\x00"
+    total = sum(struct.unpack(f"!{len(data) // 2}H", data))
+    total = (total >> 16) + (total & 0xFFFF)
+    total += total >> 16
+    return ~total & 0xFFFF
+
+
+def echo_request(sequence: int, identifier: int = 0) -> bytes:
+    """Type 8 is "echo request". Linux overwrites the checksum and identifier with its own;
+    macOS sends the packet as it is, so both have to be right already."""
+    bare = struct.pack("!BBHHH", 8, 0, 0, identifier, sequence) + PING_PAYLOAD
+    return struct.pack("!BBHHH", 8, 0, checksum(bare), identifier, sequence) + PING_PAYLOAD
+
+
+def is_reply(data: bytes, sequence: int) -> bool:
+    """True if `data` answers our echo with this sequence number."""
+    # macOS hands over the whole IP packet, Linux only what is inside it. An IP header starts
+    # with 0x4_, an echo reply with 0, so the two cannot be mistaken for each other.
+    if data and data[0] >> 4 == 4:
+        data = data[(data[0] & 0x0F) * 4 :]
+    # A late reply to an earlier ping can still arrive; only our own sequence counts.
+    return len(data) >= 8 and data[0] == 0 and struct.unpack("!H", data[6:8])[0] == sequence
+
+
 def echo(sock: socket.socket, host: str, sequence: int, timeout: float) -> float | None:
     """One ICMP echo; the round trip in milliseconds, or None if no reply came in time."""
     sent = time.perf_counter()
-    # Type 8 is "echo request". The kernel fills in the checksum and the identifier.
-    sock.sendto(struct.pack("!BBHHH", 8, 0, 0, 0, sequence) + PING_PAYLOAD, (host, 0))
+    sock.sendto(echo_request(sequence, os.getpid() & 0xFFFF), (host, 0))
     deadline = sent + timeout
     while True:
         remaining = deadline - time.perf_counter()
@@ -46,8 +73,7 @@ def echo(sock: socket.socket, host: str, sequence: int, timeout: float) -> float
             data, _ = sock.recvfrom(256)
         except socket.timeout:
             return None
-        # A late reply to an earlier ping can still arrive here; only our own sequence counts.
-        if len(data) >= 8 and data[0] == 0 and struct.unpack("!H", data[6:8])[0] == sequence:
+        if is_reply(data, sequence):
             return (time.perf_counter() - sent) * 1000
 
 
@@ -74,7 +100,7 @@ class Pinger(threading.Thread):
     """Pings one host every `interval` seconds and remembers the last `keep` results."""
 
     def __init__(self, host: str, interval: float = 1.0, keep: int = 120, timeout: float = 1.0,
-                 open_socket: Callable[[], socket.socket] = open_icmp):
+                 open_socket: Callable[[], Any] = open_icmp, echo: Callable[..., float | None] = echo):
         super().__init__(daemon=True, name=f"ping-{host}")
         self.host = host
         self.interval = interval
@@ -83,8 +109,11 @@ class Pinger(threading.Thread):
         self.timeout = min(timeout, interval)
         self.results: deque[float | None] = deque(maxlen=keep)
         self.error: str | None = None
+        # What is opened only has to be something `echo` can use and that can be closed: a socket
+        # on Linux and macOS, a handle of the system's own ping service on Windows.
         self._open = open_socket
-        self._sock: socket.socket | None = None
+        self._echo = echo
+        self._sock: Any = None
         self._sequence = 0
         self._halt = threading.Event()
 
@@ -93,7 +122,7 @@ class Pinger(threading.Thread):
         try:
             if self._sock is None:
                 self._sock = self._open()
-            rtt = echo(self._sock, self.host, self._sequence, self.timeout)
+            rtt = self._echo(self._sock, self.host, self._sequence, self.timeout)
             self.results.append(rtt)
             self.error = None
             if rtt is None:

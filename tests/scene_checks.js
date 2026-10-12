@@ -1,7 +1,10 @@
-// Checks of the centrepiece's motion (frontend/scene.js): nothing may jump when data arrives.
+// Checks of the centrepiece's motion (rack_dashboard/frontend/scene.js): nothing may jump when data arrives.
 // The page has no build step and no JavaScript tooling, so these run under gjs, the JavaScript
-// engine that ships with GNOME:  gjs -m tests/scene_checks.js   (tests/test_scene.py does that for pytest).
-import { Scene, intensity } from "../frontend/scene.js";
+// engine that ships with GNOME, or under node:  gjs -m tests/scene_checks.js   (tests/test_scene.py does that for pytest).
+import { Scene, intensity } from "../rack_dashboard/frontend/scene.js";
+
+// gjs has print(); node has console.log().
+const print = globalThis.print ?? console.log;
 
 let failed = 0;
 let passed = 0;

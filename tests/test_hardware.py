@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
-from backend.collectors import hardware as mod
-from backend.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
-from backend.state import StateFile
+from rack_dashboard.collectors import hardware as mod
+from rack_dashboard.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
+from rack_dashboard.state import StateFile
 
 GIB = 1024**3
 MIB = 1024**2
@@ -933,3 +934,53 @@ def test_program_list_is_refreshed(rig):
     assert collector.collect()["gpu"]["apps"]["count"] == 5
     rig.tick(1)
     assert collector.collect()["gpu"]["apps"] == {"count": 1, "mem": 9000 * MIB}
+
+
+# --- systems other than Linux -----------------------------------------------------------------------
+
+
+def test_processor_load_from_another_source():
+    readings = iter([(1000.0, 800.0), (1100.0, 850.0), (1200.0, 950.0), (1200.0, 950.0)])
+    cpu = CpuPower(zone=Path("/nonexistent"), stat=Path("/nonexistent"), idle_watts=20.0, max_watts=120.0, ticks=lambda: next(readings))
+
+    assert cpu.read() == {"watts": None, "measured": False, "load": None}
+    # 100 units passed, 50 of them idle: half busy, and the estimate sits half way.
+    assert cpu.read() == {"watts": 70.0, "measured": False, "load": 0.5}
+    assert cpu.read()["load"] == 0.0
+    # No time passed between two readings: nothing to say.
+    assert cpu.read()["load"] is None
+
+
+def test_processor_load_source_that_fails():
+    def broken():
+        raise RuntimeError("no access")
+
+    cpu = CpuPower(zone=Path("/nonexistent"), stat=Path("/nonexistent"), ticks=broken)
+    assert cpu.read() == {"watts": None, "measured": False, "load": None}
+
+
+def test_inventory_that_takes_a_while_is_asked_for_again(rig):
+    answers = [
+        {**INVENTORY, "board": None, "disks": [], "pending": True},
+        {**INVENTORY, "board": None, "disks": [], "pending": True},
+        dict(INVENTORY),
+    ]
+    asked = []
+
+    def slow_inventory():
+        asked.append(1)
+        return answers[min(len(asked), len(answers)) - 1]
+
+    collector = rig.build(inventory=slow_inventory)
+    first = collector.collect()
+    assert first["inventory"]["board"] is None and "pending" not in first["inventory"]
+    rig.tick()
+    collector.collect()
+    rig.tick()
+    final = collector.collect()
+    assert final["inventory"]["board"] == INVENTORY["board"] and len(asked) == 3
+    # Once the answer is whole it is kept for the usual ten minutes.
+    for _ in range(30):
+        rig.tick()
+        collector.collect()
+    assert len(asked) == 3

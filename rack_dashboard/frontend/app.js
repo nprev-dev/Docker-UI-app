@@ -66,8 +66,8 @@ function connect() {
     render("top strip", renderKpis, snapshot);
     render("centrepiece", renderHero, snapshot);
     render("containers", renderContainers, snapshot.containers);
-    render("network", (data) => renderNetwork(data, snapshot.interval), snapshot.network);
-    render("hardware", renderHardware, snapshot.hardware);
+    render("network", (data) => renderNetwork(data, snapshot.interval, snapshot.system), snapshot.network);
+    render("hardware", (data) => renderHardware(data, snapshot.system), snapshot.hardware);
     render("event log", renderLog, snapshot.events);
   };
 

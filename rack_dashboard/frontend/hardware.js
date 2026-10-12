@@ -121,8 +121,10 @@ function renderPower(data) {
 const tempRows = new Map();
 let tempNames = null;
 
-function renderTemps(temps) {
-  const names = temps.map((temp) => temp.name).join(",");
+function renderTemps(temps, system) {
+  // Windows and macOS give ordinary programs no way to read sensors; say that rather than "none".
+  const none = system?.missing?.includes("sensors") ? `-- not readable on ${system.name} --` : "-- no sensors --";
+  const names = `${temps.map((temp) => temp.name).join(",")}|${none}`;
   if (names !== tempNames) {
     // The set of sensors changed (a driver was loaded, a drive added): lay the lines out again.
     tempNames = names;
@@ -135,7 +137,7 @@ function renderTemps(temps) {
       tempRows.set(temp.name, { meter, value });
       return node;
     });
-    fill(f.temps, lines.length ? lines : [element("p", "line faint", "-- no sensors --")]);
+    fill(f.temps, lines.length ? lines : [element("p", "line faint", none)]);
   }
   for (const temp of temps) {
     const row = tempRows.get(temp.name);
@@ -149,8 +151,9 @@ function renderTemps(temps) {
 
 let coolingKey = null;
 
-function renderCooling(data) {
-  const signature = JSON.stringify([data.fans, data.volts, data.board_sensors]);
+function renderCooling(data, system) {
+  const unreadable = system?.missing?.includes("sensors");
+  const signature = JSON.stringify([data.fans, data.volts, data.board_sensors, unreadable, system?.name]);
   if (signature === coolingKey) return;
   coolingKey = signature;
 
@@ -168,8 +171,10 @@ function renderCooling(data) {
   for (const volt of data.volts ?? []) {
     lines.push(line(volt.name, `${volt.v.toFixed(3)} V`.padStart(22), "line"));
   }
-  // The board's own fan and voltage chip needs a kernel driver that is not loaded by default.
-  if (!data.board_sensors) lines.push(element("p", "line faint", "board  driver not loaded"));
+  // On Linux the board's own fan and voltage chip needs a kernel driver that is not loaded by
+  // default. Other systems do not let ordinary programs read it at all.
+  if (unreadable) lines.push(element("p", "line faint", `board  unreadable on ${system.name}`));
+  else if (!data.board_sensors) lines.push(element("p", "line faint", "board  driver not loaded"));
   fill(f.cooling, lines);
 }
 
@@ -318,7 +323,7 @@ function renderCards(data) {
 
 // --- Panel -----------------------------------------------------------------------
 
-export function renderHardware(data) {
+export function renderHardware(data, system) {
   if (!data) return;
   const failed = data.ok === false;
   f.tag.dataset.tone = failed ? "crit" : "";
@@ -327,8 +332,8 @@ export function renderHardware(data) {
   renderInventory(data.inventory ?? {});
   renderPower(data.power ?? {});
   renderCards(data.gpu ?? {});
-  renderTemps(data.temps ?? []);
-  renderCooling(data);
+  renderTemps(data.temps ?? [], system);
+  renderCooling(data, system);
   renderUps(data.ups, data.room);
 }
 

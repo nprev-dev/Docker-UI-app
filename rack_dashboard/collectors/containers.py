@@ -7,10 +7,10 @@ import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable
 
-from backend.collectors.util import brief
+from rack_dashboard.collectors import system
+from rack_dashboard.collectors.util import brief
 
 # Only these states have live counters; asking for stats on the rest is wasted work.
 STATS_STATES = {"running", "paused"}
@@ -39,11 +39,7 @@ def socket_candidates() -> list[str]:
     if explicit:
         # An explicit choice is final; quietly using another daemon would show the wrong machine.
         return [explicit]
-    return [
-        "unix:///var/run/docker.sock",
-        # Docker Desktop for Linux keeps its socket in the user's home instead.
-        f"unix://{Path.home()}/.docker/desktop/docker.sock",
-    ]
+    return system.docker_sockets()
 
 
 def connect() -> Any:
@@ -252,10 +248,10 @@ _FRACTION = re.compile(r"\.(\d+)")
 
 
 def _parse_time(stamp: str | None) -> float | None:
-    """Docker stamps carry nanoseconds; trim them to the microseconds datetime accepts."""
+    """Docker stamps carry nanoseconds; datetime wants exactly six digits (older Pythons insist on it)."""
     if not stamp or stamp.startswith("0001-"):
         return None
-    trimmed = _FRACTION.sub(lambda m: "." + m.group(1)[:6], stamp, count=1).replace("Z", "+00:00")
+    trimmed = _FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), stamp, count=1).replace("Z", "+00:00")
     try:
         return datetime.fromisoformat(trimmed).timestamp()
     except ValueError:

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Callable
 from xml.etree import ElementTree
 
+from rack_dashboard.collectors.util import run
+
 # Wall-power samples kept for the graph, and how many seconds each one covers.
 HISTORY = 120
 HISTORY_STEP = 5.0
@@ -152,9 +154,12 @@ class CpuPower:
         idle_watts: float = 25.0,
         max_watts: float = 142.0,
         monotonic: Callable[[], float] = time.monotonic,
+        ticks: Callable[[], tuple[float, float]] | None = None,
     ):
         self._zone = zone
         self._stat = stat
+        # Another way to ask how busy the processor has been, for systems without /proc.
+        self._ticks = ticks
         self._idle_watts = idle_watts
         self._max_watts = max_watts
         self._monotonic = monotonic
@@ -196,15 +201,21 @@ class CpuPower:
 
     def _load(self) -> float | None:
         """Share of processor time spent working since the last call, 0..1."""
-        line = (_read(self._stat) or "").split("\n", 1)[0].split()
-        if len(line) < 6 or line[0] != "cpu":
-            return None
-        try:
-            ticks = [int(value) for value in line[1:9]]
-        except ValueError:
-            return None
-        total = sum(ticks)
-        idle = ticks[3] + (ticks[4] if len(ticks) > 4 else 0)
+        if self._ticks is not None:
+            try:
+                total, idle = self._ticks()
+            except Exception:  # noqa: BLE001
+                return None
+        else:
+            line = (_read(self._stat) or "").split("\n", 1)[0].split()
+            if len(line) < 6 or line[0] != "cpu":
+                return None
+            try:
+                ticks = [int(value) for value in line[1:9]]
+            except ValueError:
+                return None
+            total = sum(ticks)
+            idle = ticks[3] + (ticks[4] if len(ticks) > 4 else 0)
         before, self._busy = self._busy, (total, idle)
         if before is None or total <= before[0]:
             return None
@@ -217,8 +228,7 @@ GPU_FIELDS = "name,memory.total,memory.used,utilization.gpu,temperature.gpu,fan.
 
 
 def query_gpus() -> str:
-    command = ["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"]
-    return subprocess.run(command, capture_output=True, text=True, timeout=5, check=True).stdout
+    return run(["nvidia-smi", f"--query-gpu={GPU_FIELDS}", "--format=csv,noheader,nounits"])
 
 
 def parse_gpus(text: str) -> list[dict]:
@@ -246,7 +256,7 @@ def parse_gpus(text: str) -> list[dict]:
 
 def query_gpu_apps() -> str:
     """nvidia-smi's full report. It is the one form that lists every program on a card, desktop ones included."""
-    return subprocess.run(["nvidia-smi", "-q", "-x"], capture_output=True, text=True, timeout=5, check=True).stdout
+    return run(["nvidia-smi", "-q", "-x"])
 
 
 def parse_gpu_apps(text: str) -> dict | None:
@@ -503,6 +513,7 @@ class HardwareCollector:
         room_sensor: str | None = None,
         inventory: Callable[[], dict] = read_inventory,
         cpu_power: CpuPower | None = None,
+        cpu_ticks: Callable[[], tuple[float, float]] | None = None,
         gpus: Callable[[], str] = query_gpus,
         gpu_apps: Callable[[], str] = query_gpu_apps,
         hwmon: Callable[[], list[dict]] = scan_hwmon,
@@ -516,7 +527,7 @@ class HardwareCollector:
         self._psu_efficiency = min(1.0, max(0.5, psu_efficiency))
         self._room_sensor = room_sensor
         self._read_inventory = inventory
-        self._cpu = cpu_power or CpuPower(idle_watts=cpu_idle_watts, max_watts=cpu_max_watts, monotonic=monotonic)
+        self._cpu = cpu_power or CpuPower(idle_watts=cpu_idle_watts, max_watts=cpu_max_watts, monotonic=monotonic, ticks=cpu_ticks)
         self._query_gpus = gpus
         self._query_gpu_apps = gpu_apps
         self._scan_hwmon = hwmon
@@ -538,7 +549,8 @@ class HardwareCollector:
 
     def collect(self) -> dict:
         now = self._monotonic()
-        if self._inventory is None or now - self._inventory_at >= INVENTORY_EVERY:
+        # A reader that needs a while (Windows) hands back what it has, marked "pending", and is asked again.
+        if self._inventory is None or self._inventory.get("pending") or now - self._inventory_at >= INVENTORY_EVERY:
             self._inventory, self._inventory_at = self._read_inventory(), now
         if self._gpus_at is None or now - self._gpus_at >= GPU_EVERY:
             self._gpus, self._gpus_at = self._gpu_readings(), now
@@ -549,7 +561,8 @@ class HardwareCollector:
 
         chips = self._scan_hwmon()
         gpus = self._gpus
-        inventory = {**self._inventory, "gpus": [{"name": g["name"], "mem_total": g["mem_total"]} for g in gpus]}
+        inventory = {key: value for key, value in self._inventory.items() if key != "pending"}
+        inventory["gpus"] = [{"name": g["name"], "mem_total": g["mem_total"]} for g in gpus]
         return {
             "ok": True,
             "error": None,

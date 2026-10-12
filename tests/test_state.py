@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from backend.state import StateFile
+from rack_dashboard.state import StateFile
 
 
 def test_missing_file_starts_empty(tmp_path):

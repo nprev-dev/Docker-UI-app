@@ -2,6 +2,15 @@
 
 from __future__ import annotations
 
+import subprocess
+
+
+def run(command: list[str], timeout: float = 5.0) -> str:
+    """What a system tool prints. Raises if it cannot be run, fails or takes too long.
+    On Windows it is kept from flashing a console window up each time."""
+    quiet = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=True, creationflags=quiet).stdout
+
 
 def brief(exc: BaseException | None) -> str:
     """The root cause in a few words; libraries wrap it in several layers of their own errors."""

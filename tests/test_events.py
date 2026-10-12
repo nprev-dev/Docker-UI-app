@@ -6,8 +6,8 @@ import copy
 
 import pytest
 
-from backend.events import KEEP, REPEAT_AFTER, EventLog
-from backend.state import StateFile
+from rack_dashboard.events import KEEP, REPEAT_AFTER, EventLog
+from rack_dashboard.state import StateFile
 
 
 class Clock:

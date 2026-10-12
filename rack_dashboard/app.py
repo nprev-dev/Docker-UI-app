@@ -8,23 +8,22 @@ import os
 import socket
 import time
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.collectors.containers import ContainerCollector
-from backend.collectors.hardware import HardwareCollector
-from backend.collectors.network import NetworkCollector, label_ports, read_boot
-from backend.events import EventLog
-from backend.state import StateFile
+from rack_dashboard import paths
+from rack_dashboard.collectors import system
+from rack_dashboard.collectors.containers import ContainerCollector
+from rack_dashboard.collectors.hardware import HardwareCollector
+from rack_dashboard.collectors.network import NetworkCollector, label_ports, read_boot
+from rack_dashboard.events import EventLog
+from rack_dashboard.state import StateFile
 
-ROOT = Path(__file__).resolve().parent.parent
 INTERVAL = float(os.environ.get("DASH_INTERVAL", "1"))
 # Idle proxies and browsers drop silent connections; a comment line keeps the stream open.
 KEEPALIVE = 15
-FRONTEND = ROOT / "frontend"
 
 
 class Hub:
@@ -56,7 +55,7 @@ def number(name: str) -> float | None:
 
 
 hub = Hub()
-state = StateFile(os.environ.get("DASH_STATE", ROOT / "data" / "state.json"))
+state = StateFile(paths.state_file())
 containers = ContainerCollector()
 hardware = HardwareCollector(
     state,
@@ -72,6 +71,7 @@ hardware = HardwareCollector(
     cpu_max_watts=number("DASH_CPU_MAX_W") or 142.0,
     # Any file holding a temperature, for a room or rack sensor.
     room_sensor=os.environ.get("DASH_ROOM_SENSOR") or None,
+    **system.hardware_readers(),
 )
 network = NetworkCollector(
     state,
@@ -84,12 +84,13 @@ network = NetworkCollector(
     speedtest_hours=float(os.environ.get("DASH_SPEEDTEST_HOURS", "6")),
     # 0 keeps the dashboard from sending anything onto the network at all.
     probes_enabled=os.environ.get("DASH_PROBES", "1") != "0",
+    **system.network_readers(),
 )
 
 
 events = EventLog(state, own_port=int(os.environ.get("DASH_PORT", "8787")))
 # When the machine came up; the page turns it into an uptime.
-BOOT_TIME = read_boot()[1] or None
+BOOT_TIME = system.network_readers().get("boot", read_boot)()[1] or None
 
 
 async def collect(name: str, collector, offline: dict) -> dict:
@@ -112,6 +113,8 @@ async def collect_loop() -> None:
         snapshot = {
             "ts": time.time(),
             "host": socket.gethostname(),
+            # Which system this is, and what it gives no way to read, so the page can say so.
+            "system": {"name": system.name(), "missing": system.missing()},
             "boot": BOOT_TIME,
             "interval": INTERVAL,
             "containers": container_data,
@@ -180,4 +183,4 @@ class FreshStaticFiles(StaticFiles):
 
 
 # Mounted last so it never shadows the API routes above.
-app.mount("/", FreshStaticFiles(directory=FRONTEND, html=True), name="frontend")
+app.mount("/", FreshStaticFiles(directory=paths.FRONTEND, html=True), name="frontend")

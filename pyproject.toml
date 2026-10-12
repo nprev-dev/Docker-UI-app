@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rack-dashboard"
+dynamic = ["version"]
+description = "A one-page status screen for a home server: containers, network, power and hardware."
+readme = "readme.md"
+license = "MIT"
+license-files = ["LICENSE", "rack_dashboard/frontend/fonts/LICENSE.txt"]
+requires-python = ">=3.10"
+keywords = ["homelab", "dashboard", "docker", "monitoring"]
+classifiers = [
+    "Environment :: Web Environment",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "docker>=7.1",
+    # Linux is read straight from the kernel's own files; other systems are asked through psutil.
+    "psutil>=5.9; sys_platform != 'linux'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "psutil>=5.9"]
+
+[project.scripts]
+rack-dashboard = "rack_dashboard.cli:main"
+
+# The same thing without a console window, for Windows to start at sign-in.
+[project.gui-scripts]
+rack-dashboardw = "rack_dashboard.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/nprev-dev/Docker-UI-app"
+
+[tool.hatch.version]
+path = "rack_dashboard/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rack_dashboard"]
+
+[tool.hatch.build.targets.sdist]
+include = ["rack_dashboard", "tests", "readme.md", "LICENSE"]

@@ -6,6 +6,9 @@ data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+dist/
+build/
+*.egg-info/
 
 # Personal and per-machine files: assistant instructions, local settings, editor folders.
 CLAUDE.md
