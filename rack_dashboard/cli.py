@@ -6,9 +6,11 @@ import argparse
 import os
 import sys
 import threading
+import time
 import webbrowser
 
 from rack_dashboard import __version__, paths
+from rack_dashboard.logfile import CappedLog
 
 
 def port(text: str) -> int:
@@ -27,6 +29,7 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--host", help="address to listen on (default 127.0.0.1; 0.0.0.0 lets other machines see the page)")
     parser.add_argument("--port", type=port, help="port to listen on (default 8787)")
     parser.add_argument("--open", action="store_true", help="open the page in the default browser once the server is up")
+    parser.add_argument("--service", action="store_true", help="started by the system, not by hand: write to the log file instead of printing")
     parser.add_argument("--version", action="version", version=f"{paths.NAME} {__version__}")
     return parser.parse_args(argv)
 
@@ -34,19 +37,23 @@ def parse(argv: list[str] | None = None) -> argparse.Namespace:
 def load_settings(environ=os.environ) -> None:
     """Settings from the settings file become environment variables, unless one is set already:
     what was typed for this one run wins over what was written down for every run."""
-    for key, value in paths.read_settings(paths.config_dir() / "env").items():
+    for key, value in paths.read_settings(paths.settings_file()).items():
         environ.setdefault(key, value)
 
 
-def keep_a_log() -> None:
-    """Started without a window (as Windows does at sign-in) there is nowhere to print to.
-    What would have been printed goes to a file beside the saved data instead."""
-    if sys.stdout is not None and sys.stderr is not None:
+def keep_a_log(service: bool = False) -> None:
+    """Started by the system instead of by hand, there is nobody to print to. What would have been
+    printed then goes to a log file: when the system says so (--service, which the start-up entry
+    the installers make passes), and whenever there is no window at all, as when Windows starts
+    it at sign-in. Started by hand, it prints wherever its output was pointed."""
+    windowless = sys.stdout is None or sys.stderr is None
+    if not windowless and not service:
         return
     try:
-        folder = paths.data_dir()
-        folder.mkdir(parents=True, exist_ok=True)
-        log = open(folder / "rack-dashboard.log", "w", buffering=1, encoding="utf-8")
+        path = paths.log_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        log = CappedLog(path)
+        log.write(f"--- started {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
     except OSError:
         log = open(os.devnull, "w")
     sys.stdout = sys.stderr = log
@@ -54,7 +61,7 @@ def keep_a_log() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     options = parse(argv)
-    keep_a_log()
+    keep_a_log(options.service)
     load_settings()
     # Settings travel as environment variables, because the app reads them once, as it is loaded.
     if options.host:

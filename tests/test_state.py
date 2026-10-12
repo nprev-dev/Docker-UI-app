@@ -55,3 +55,18 @@ def test_no_scratch_file_is_left_behind(tmp_path):
     StateFile(path).set("a", 1)
 
     assert [p.name for p in tmp_path.iterdir()] == ["state.json"]
+
+
+def test_a_folder_taken_away_is_not_brought_back(tmp_path):
+    state = StateFile(tmp_path / "home" / "state.json")
+    state.set("a", 1)
+    assert (tmp_path / "home" / "state.json").exists()
+
+    # An uninstall while the dashboard is still running removes the folder under it.
+    (tmp_path / "home" / "state.json").unlink()
+    (tmp_path / "home").rmdir()
+    state.set("b", 2)
+
+    assert not (tmp_path / "home").exists()
+    # What was set is still there for as long as it runs.
+    assert state.get("b") == 2

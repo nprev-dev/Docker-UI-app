@@ -107,3 +107,64 @@ def test_settings_file_missing_or_unreadable(tmp_path):
     # Notepad on Windows likes to put a marker at the start of a file; it is not part of the first key.
     (tmp_path / "marked").write_bytes(b"\xef\xbb\xbfDASH_PORT=9000\r\nDASH_HOST=0.0.0.0\r\n")
     assert paths.read_settings(tmp_path / "marked") == {"DASH_PORT": "9000", "DASH_HOST": "0.0.0.0"}
+
+
+# --- A copy an installer put in a folder of its own ---------------------------------------------
+
+
+def installed(tmp_path: Path) -> tuple[Path, Path]:
+    """A folder laid out as the installers leave it; returns it and where its Python sits."""
+    folder = tmp_path / "rack-dashboard"
+    prefix = folder / "tools" / "rack-dashboard"
+    prefix.mkdir(parents=True)
+    (folder / paths.MARKER).write_text("Rack Dashboard is installed in this folder.\n")
+    return folder, prefix
+
+
+def test_an_installed_copy_knows_its_folder(tmp_path):
+    folder, prefix = installed(tmp_path)
+
+    assert paths.home({}, prefix) == folder
+
+
+def test_a_copy_installed_another_way_has_no_folder_of_its_own(tmp_path):
+    # Same shape, but nobody left the marker: this is somebody's own Python environment.
+    prefix = tmp_path / "somewhere" / "tools" / "rack-dashboard"
+    prefix.mkdir(parents=True)
+
+    assert paths.home({}, prefix) is None
+    # A folder of that name is not the marker either.
+    (tmp_path / "somewhere" / paths.MARKER).mkdir()
+    assert paths.home({}, prefix) is None
+    # Nor is this test run itself in such a folder.
+    assert paths.home({}) is None
+
+
+def test_the_folder_can_be_named_outright(tmp_path):
+    folder, prefix = installed(tmp_path)
+
+    assert paths.home({"DASH_HOME": str(tmp_path / "elsewhere")}, prefix) == tmp_path / "elsewhere"
+
+
+def test_an_installed_copy_keeps_everything_in_its_folder(tmp_path):
+    folder, prefix = installed(tmp_path)
+    # What the system would otherwise point to is of no interest to it.
+    environ = {"XDG_DATA_HOME": "/srv/data", "XDG_CONFIG_HOME": "/srv/config", "APPDATA": "C:/Roaming", "LOCALAPPDATA": "C:/Local"}
+
+    assert paths.settings_file(environ, prefix) == folder / "env"
+    assert paths.state_file(environ, tmp_path / "site-packages" / "rack_dashboard", prefix) == folder / "state.json"
+    assert paths.log_file(environ, prefix) == folder / "rack-dashboard.log"
+
+
+def test_an_explicit_state_file_wins_over_the_folder_too(tmp_path):
+    folder, prefix = installed(tmp_path)
+
+    assert paths.state_file({"DASH_STATE": "/somewhere/else.json"}, tmp_path / "rack_dashboard", prefix) == Path("/somewhere/else.json")
+
+
+def test_without_a_folder_settings_and_log_go_where_the_system_keeps_such_things(tmp_path):
+    prefix = tmp_path / "venv"
+    environ = {"XDG_CONFIG_HOME": "/srv/config", "XDG_DATA_HOME": "/srv/data", "APPDATA": "C:/Roaming", "LOCALAPPDATA": "C:/Local"}
+
+    assert paths.settings_file(environ, prefix) == paths.config_dir(environ=environ) / "env"
+    assert paths.log_file(environ, prefix) == paths.data_dir(environ=environ) / "rack-dashboard.log"

@@ -14,6 +14,12 @@ class StateFile:
         self.path = Path(path)
         self._lock = threading.Lock()
         self._data = self._load()
+        try:
+            # Made once, here. If the folder is taken away later (an uninstall while this is still
+            # running), saving quietly stops; it must not bring the folder back.
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
 
     def _load(self) -> dict:
         try:
@@ -31,7 +37,6 @@ class StateFile:
         with self._lock:
             self._data[key] = value
             try:
-                self.path.parent.mkdir(parents=True, exist_ok=True)
                 # Write beside the file and swap it in, so a crash never leaves half a file.
                 scratch = self.path.with_suffix(self.path.suffix + ".tmp")
                 scratch.write_text(json.dumps(self._data))
