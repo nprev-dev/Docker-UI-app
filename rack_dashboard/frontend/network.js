@@ -13,7 +13,9 @@ import {
   formatRateShort,
   formatTime,
   niceCeil,
+  setData,
   setText,
+  setTitle,
   sticks,
   surface,
 } from "./common.js";
@@ -121,7 +123,7 @@ function renderLink(data) {
   const link = data.link;
   setText(f.iface, link ? `${link.name} ` : "-");
   setText(f["iface-state"], link ? link.state : "");
-  f["iface-state"].dataset.tone = !link ? "" : link.state === "up" ? "ok" : "crit";
+  setData(f["iface-state"], "tone", !link ? "" : link.state === "up" ? "ok" : "crit");
   setText(f.speed, link?.speed ? `${link.speed} Mb/s${link.duplex ? ` ${link.duplex}` : ""}` : "-");
   setText(f.addr, dash(link?.address));
   setText(f.gateway, dash(data.gateway));
@@ -184,13 +186,13 @@ function renderPing(ping, data) {
   if (!data) {
     setText(ping.text, `${label}-`);
     setText(ping.loss, "");
-    ping.loss.dataset.tone = "";
+    setData(ping.loss, "tone", "");
   } else {
     setText(ping.text, `${label}${data.host.padEnd(15)} ${dash(data.last, formatMs).padStart(9)} `);
     setText(ping.loss, data.loss == null ? "" : `${data.loss >= 99.95 ? "100" : data.loss.toFixed(1)}%`.padStart(6));
-    ping.loss.dataset.tone = data.loss >= LOSS_CRITICAL ? "crit" : data.loss >= LOSS_WARNING ? "warn" : "";
+    setData(ping.loss, "tone", data.loss >= LOSS_CRITICAL ? "crit" : data.loss >= LOSS_WARNING ? "warn" : "");
     const cadence = `pinged every ${formatDuration(ping.interval)}, loss over the last ${formatDuration(ping.history.length * ping.interval)}`;
-    ping.text.parentNode.title = [cadence, data.error].filter(Boolean).join(" -- ");
+    setTitle(ping.text.parentNode, [cadence, data.error].filter(Boolean).join(" -- "));
   }
   drawSpark(ping);
 }
@@ -203,8 +205,8 @@ function renderDns(dns) {
   }
   setText(f.dns, `dns      ${dash(dns.server).padEnd(15)} ${dash(dns.ms, formatMs).padStart(9)} `);
   setText(f["dns-state"], (dns.ok ? "ok" : "FAIL").padStart(6));
-  f["dns-state"].dataset.tone = dns.ok ? "ok" : "crit";
-  f.dns.parentNode.title = dns.error ?? "";
+  setData(f["dns-state"], "tone", dns.ok ? "ok" : "crit");
+  setTitle(f.dns.parentNode, dns.error ?? "");
 }
 
 let lastWanIp = null;
@@ -224,7 +226,7 @@ function renderWan(wan, now) {
     if (lastWanIp && lastWanIp !== wan.ip) blink(line, "change");
     lastWanIp = wan.ip;
   }
-  line.title = [wan.previous && `was ${wan.previous}`, wan.error].filter(Boolean).join(" -- ");
+  setTitle(line, [wan.previous && `was ${wan.previous}`, wan.error].filter(Boolean).join(" -- "));
 }
 
 function renderSpeed(speed, now) {
@@ -244,8 +246,8 @@ function renderSpeed(speed, now) {
   else if (!speed.enabled) note = [ago, "testing is off"].filter(Boolean).join(", ");
   else note = [ago, next].filter(Boolean).join(", ");
   setText(f.speed2, `         ${note}`);
-  f.speed2.dataset.tone = speed.running ? "bright" : speed.error ? "crit" : "";
-  f.speed2.title = speed.error ?? "";
+  setData(f.speed2, "tone", speed.running ? "bright" : speed.error ? "crit" : "");
+  setTitle(f.speed2, speed.error ?? "");
 }
 
 // --- Lists -------------------------------------------------------------------
@@ -268,7 +270,7 @@ function renderListening(entries) {
   setText(f["listening-count"], `${entries.length} open, ${exposed} reachable`);
   const lines = shown.map((entry) => {
     const line = element("p", "line free", `${entry.port}/${entry.proto}`.padEnd(10));
-    line.dataset.scope = entry.scope;
+    setData(line, "scope", entry.scope);
     line.append(element("span", "scope", entry.scope.padEnd(4)), dash(entry.who));
     // A port that was not open a moment ago deserves a look. Nothing blinks on the first fill.
     if (knownPorts && !knownPorts.has(`${entry.port}/${entry.proto}`)) blink(line, "new");
@@ -293,7 +295,7 @@ function renderTalkers(talkers, system) {
       const host = talker.host.length > 15 ? `${talker.host.slice(0, 14)}…` : talker.host;
       const text = `${host.padEnd(16)}${formatRateShort(talker.rx_bps).padStart(7)}${formatRateShort(talker.tx_bps).padStart(7)}`;
       const line = element("p", "line", text);
-      line.title = `${talker.host}, ${talker.conns} connection${talker.conns === 1 ? "" : "s"}`;
+      setTitle(line, `${talker.host}, ${talker.conns} connection${talker.conns === 1 ? "" : "s"}`);
       return line;
     }),
   );
@@ -307,7 +309,7 @@ export function renderNetwork(data, interval, system) {
   flow.step = interval || 1;
 
   const failed = data.ok === false;
-  f.tag.dataset.tone = failed ? "crit" : "";
+  setData(f.tag, "tone", failed ? "crit" : "");
   const link = data.link ? `${data.link.name} ${data.link.state}` : "no link";
   setText(f.tag, failed ? `!! ${data.error ?? "network data unavailable"}` : link);
 

@@ -11,6 +11,16 @@ export function setText(node, text) {
   if (node.textContent !== text) node.textContent = text;
 }
 
+// Attributes too are written only when they change: the browser takes every write for a change to
+// the page, one that leaves it as it was included, and looks the page over again.
+export function setData(node, key, value) {
+  if (node.dataset[key] !== value) node.dataset[key] = value;
+}
+
+export function setTitle(node, text) {
+  if (node.title !== text) node.title = text;
+}
+
 // --- Numbers as text ---------------------------------------------------------
 
 // Three significant digits at most, the way htop and docker print sizes.
@@ -72,9 +82,11 @@ export const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const gliding = new Set();
 let lastFrame = null;
 let frameQueued = false;
+// Set while another animation loop (the centrepiece) takes the rolling numbers along in its frames.
+let drivenElsewhere = false;
 
 function queueFrame() {
-  if (frameQueued) return;
+  if (frameQueued || drivenElsewhere) return;
   frameQueued = true;
   requestAnimationFrame(frame);
 }
@@ -82,17 +94,25 @@ function queueFrame() {
 function frame(now) {
   frameQueued = false;
   // Real elapsed time, so a slow or paused screen catches up instead of lagging behind.
-  const elapsed = lastFrame == null ? 16 : now - lastFrame;
-  lastFrame = now;
+  stepGlides(lastFrame == null ? 16 : now - lastFrame);
+  lastFrame = gliding.size ? now : null;
+  if (gliding.size) queueFrame();
+}
+
+function stepGlides(elapsed) {
   const pull = calm ? 1 : 1 - Math.exp(-elapsed / GLIDE_MS);
   for (const glide of gliding) {
     if (glide.step(pull)) gliding.delete(glide);
   }
-  if (gliding.size) {
-    queueFrame();
-  } else {
-    lastFrame = null;
-  }
+}
+
+// For an animation loop that draws frames of its own anyway. The rolling numbers then move in those
+// frames and no others, so the browser lays out and paints the page once per frame instead of twice,
+// and a loop that slows down to spare a weak machine takes the numbers down with it.
+// Call the returned function with the milliseconds since the last frame, in every frame drawn.
+export function driveGlides() {
+  drivenElsewhere = true;
+  return stepGlides;
 }
 
 // A value that rolls towards its target and redraws on the way; draw(null) means "no reading".
@@ -176,7 +196,7 @@ export function drawMeter({ meter, fill, rest, cells: width }, percent, level = 
   const cells = percent == null || percent < 0.05 ? 0 : Math.min(width, Math.ceil((percent / 100) * width));
   setText(fill, "|".repeat(cells));
   setText(rest, " ".repeat(width - cells));
-  meter.dataset.level = level;
+  setData(meter, "level", level);
 }
 
 // --- Character grid ----------------------------------------------------------

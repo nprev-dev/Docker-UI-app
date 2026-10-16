@@ -10,7 +10,9 @@ import {
   formatDuration,
   formatEnergy,
   niceCeil,
+  setData,
   setText,
+  setTitle,
   sticks,
   surface,
 } from "./common.js";
@@ -67,7 +69,7 @@ function renderInventory(inventory) {
   for (const disk of inventory.disks ?? []) {
     const text = `${disk.name.padEnd(8)} ${formatBytes(disk.bytes).padStart(5)}  ${disk.model ?? ""}`.trimEnd();
     const node = line("disk", text);
-    node.title = `${disk.name}: ${disk.kind}`;
+    setTitle(node, `${disk.name}: ${disk.kind}`);
     lines.push(node);
   }
   fill(f.inventory, lines);
@@ -194,7 +196,7 @@ function renderUps(ups, room) {
   } else {
     lines.push(line("ups", ups.model));
     const state = line("state", ups.on_battery ? "ON BATTERY" : dash(ups.state));
-    state.dataset.tone = ups.on_battery ? "crit" : "ok";
+    setData(state, "tone", ups.on_battery ? "crit" : "ok");
     // Mains power failing, or coming back, is the one thing here that must catch the eye.
     if (lastOnBattery != null && lastOnBattery !== ups.on_battery) blink(state, "change");
     lines.push(state);
@@ -213,7 +215,7 @@ function renderUps(ups, room) {
     lines.push(line("room", "no sensor set", "line faint"));
   } else if (room.c == null) {
     const node = line("room", "sensor unreadable");
-    node.dataset.tone = "warn";
+    setData(node, "tone", "warn");
     lines.push(node);
   } else {
     lines.push(line("room", `${room.c.toFixed(1)}°C`));
@@ -246,7 +248,7 @@ function layCards(cards, error) {
   cardRows = [];
   if (!cards.length) {
     const node = line("gpu", error ? "not answering" : "none found", "line faint");
-    if (error) node.dataset.tone = "crit";
+    if (error) setData(node, "tone", "crit");
     lines.push(node);
   } else if (cards.length === 1) {
     // A single card gets one line for how hard it is working and one for how full its memory is.
@@ -308,9 +310,9 @@ function renderCards(data) {
 
   const extra = cards.length > CARD_ROWS ? `, ${CARD_ROWS} shown` : "";
   const names = cards.length === 1 ? shortCard(cards[0].name) : cards.length ? `${cards.length} cards${extra}` : "";
-  f["card-tag"].dataset.tone = error ? "crit" : "";
+  setData(f["card-tag"], "tone", error ? "crit" : "");
   setText(f["card-tag"], error ? `!! ${error}` : names);
-  f["card-tag"].title = error ?? cards.map((item) => item.name).join(", ");
+  setTitle(f["card-tag"], error ?? cards.map((item) => item.name).join(", "));
 
   card.history = data.history?.load ?? [];
   card.step = data.history?.step ?? 5;
@@ -326,7 +328,7 @@ function renderCards(data) {
 export function renderHardware(data, system) {
   if (!data) return;
   const failed = data.ok === false;
-  f.tag.dataset.tone = failed ? "crit" : "";
+  setData(f.tag, "tone", failed ? "crit" : "");
   setText(f.tag, failed ? `!! ${data.error ?? "hardware data unavailable"}` : "~ = estimated");
   if (failed) return;
   renderInventory(data.inventory ?? {});

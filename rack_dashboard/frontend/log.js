@@ -1,6 +1,6 @@
 // Event log: what changed, newest first.
 
-import { blink, element, formatTime } from "./common.js";
+import { blink, element, formatTime, setData, setTitle } from "./common.js";
 
 // Lines the section has room for.
 const ROWS = 10;
@@ -22,13 +22,13 @@ export function renderLog(events) {
   list.replaceChildren(
     ...shown.map((event) => {
       const line = element("p", "line free event");
-      line.dataset.tone = event.level === "info" ? "" : event.level;
+      setData(line, "tone", event.level === "info" ? "" : event.level);
       line.append(
         element("span", "faint", `${formatTime(new Date(event.ts * 1000))} `),
         element("span", "tag", event.tag.padEnd(6)),
         element("span", "text", event.text),
       );
-      line.title = event.text;
+      setTitle(line, event.text);
       // Lines that arrived since the last draw blink once. Nothing blinks when the page first loads.
       if (newest != null && event.ts > newest) blink(line, "new");
       return line;

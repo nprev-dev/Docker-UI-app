@@ -9,19 +9,34 @@ import socket
 import time
 from contextlib import asynccontextmanager, suppress
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse, StreamingResponse
+from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 
 from rack_dashboard import paths
 from rack_dashboard.collectors import system
 from rack_dashboard.collectors.containers import ContainerCollector
 from rack_dashboard.collectors.hardware import HardwareCollector
 from rack_dashboard.collectors.network import NetworkCollector, label_ports, read_boot
+from rack_dashboard.collectors.nvml import Nvml
 from rack_dashboard.events import EventLog
 from rack_dashboard.state import StateFile
 
 INTERVAL = float(os.environ.get("DASH_INTERVAL", "1"))
+
+
+def frame_rate(text: str | None) -> int:
+    """Frames a second for the page's moving parts (DASH_FPS): 30 unless set, and kept between 10
+    and 120. Something that is not a whole number is ignored."""
+    try:
+        value = int((text or "").strip())
+    except ValueError:
+        return 30
+    return min(120, max(10, value))
+
+
+FPS = frame_rate(os.environ.get("DASH_FPS"))
 # Idle proxies and browsers drop silent connections; a comment line keeps the stream open.
 KEEPALIVE = 15
 
@@ -71,6 +86,7 @@ hardware = HardwareCollector(
     cpu_max_watts=number("DASH_CPU_MAX_W") or 142.0,
     # Any file holding a temperature, for a room or rack sensor.
     room_sensor=os.environ.get("DASH_ROOM_SENSOR") or None,
+    gpu_library=Nvml(),
     **system.hardware_readers(),
 )
 network = NetworkCollector(
@@ -117,6 +133,7 @@ async def collect_loop() -> None:
             "system": {"name": system.name(), "missing": system.missing()},
             "boot": BOOT_TIME,
             "interval": INTERVAL,
+            "fps": FPS,
             "containers": container_data,
             "network": network_data,
             "hardware": hardware_data,
@@ -132,7 +149,7 @@ async def collect_loop() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: Starlette):
     task = asyncio.create_task(collect_loop())
     yield
     task.cancel()
@@ -142,18 +159,13 @@ async def lifespan(app: FastAPI):
     hardware.close()
 
 
-app = FastAPI(title="Rack dashboard", lifespan=lifespan)
-
-
-@app.get("/api/snapshot")
-async def snapshot():
+async def snapshot(request) -> JSONResponse:
     if hub.snapshot is None:
         return JSONResponse({"detail": "first sample not collected yet"}, status_code=503)
-    return hub.snapshot
+    return JSONResponse(hub.snapshot)
 
 
-@app.get("/api/stream")
-async def stream():
+async def stream(request) -> StreamingResponse:
     async def events():
         sequence = 0
         # Tells the browser how long to wait before reconnecting after a drop.
@@ -182,5 +194,12 @@ class FreshStaticFiles(StaticFiles):
         return response
 
 
-# Mounted last so it never shadows the API routes above.
-app.mount("/", FreshStaticFiles(directory=paths.FRONTEND, html=True), name="frontend")
+app = Starlette(
+    routes=[
+        Route("/api/snapshot", snapshot),
+        Route("/api/stream", stream),
+        # Last, so it never shadows the API routes above.
+        Mount("/", FreshStaticFiles(directory=paths.FRONTEND, html=True), name="frontend"),
+    ],
+    lifespan=lifespan,
+)

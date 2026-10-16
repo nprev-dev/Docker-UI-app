@@ -1,13 +1,13 @@
 // Top strip: the few numbers worth reading from across the room.
 
-import { Glide, formatDuration, formatEnergy, formatRate, setText } from "./common.js";
+import { Glide, formatDuration, formatEnergy, formatRate, setData, setText } from "./common.js";
 
 // How many graph samples the "peak" under each network number looks back over.
 const PEAK_WINDOW = 120;
 
 const k = Object.fromEntries(Array.from(document.querySelectorAll("[data-k]"), (node) => [node.dataset.k, node]));
 const tone = (id, value) => {
-  document.getElementById(id).dataset.tone = value ?? "";
+  setData(document.getElementById(id), "tone", value ?? "");
 };
 
 const cpu = new Glide((value) => setText(k.cpu, value == null ? "-" : value.toFixed(0)));

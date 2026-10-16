@@ -757,3 +757,13 @@ def test_no_name_server_known(probing):
 
     with pytest.raises(RuntimeError, match="no resolver"):
         collector._time_dns()
+
+
+def test_link_local_addresses_lose_their_interface_name_however_ss_brackets_them():
+    text = (
+        "udp   UNCONN 0      0      [fe80::1234:56ff:fe78:9abc]%enp3s0:3702 [::]:*\n"
+        "udp   UNCONN 0      0      [fe80::1%enp3s0]:546 [::]:*\n"
+        "udp   UNCONN 0      0      127.0.0.53%lo:53 0.0.0.0:*\n"
+    )
+
+    assert [(s.local, s.local_port) for s in mod.parse_sockets(text)] == [("fe80::1234:56ff:fe78:9abc", 3702), ("fe80::1", 546), ("127.0.0.53", 53)]
