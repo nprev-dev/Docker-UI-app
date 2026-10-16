@@ -1,6 +1,18 @@
 // Containers table: one line per container, text meters, reverse-video blinks on change.
 
-import { Glide, blink, buildMeter, drawMeter, element, formatBytes, formatRate, setText, stopBlink } from "./common.js";
+import {
+  Glide,
+  blink,
+  buildMeter,
+  drawMeter,
+  element,
+  formatBytes,
+  formatRate,
+  setData,
+  setText,
+  setTitle,
+  stopBlink,
+} from "./common.js";
 
 const ROW_EXIT_MS = 500;
 // Lines the table has room for; one more container than that and the last line says how many are hidden.
@@ -83,7 +95,7 @@ function renderPorts(row, ports) {
   if (key === row.portsKey) return;
   row.portsKey = key;
   row.ports.replaceChildren();
-  row.ports.title = ports.map((p) => `${p.host ?? "-"}->${p.container}/${p.proto}`).join("  ");
+  setTitle(row.ports, ports.map((p) => `${p.host ?? "-"}->${p.container}/${p.proto}`).join("  "));
   if (!ports.length) {
     row.ports.append("-");
     return;
@@ -112,16 +124,16 @@ function updateRow(row, container) {
 
   if (row.tr.dataset.label !== label) {
     blink(row.tr, row.tr.dataset.label ? "change" : "new");
-    row.tr.dataset.label = label;
+    setData(row.tr, "label", label);
   }
-  row.tr.dataset.state = container.state;
-  row.tr.dataset.tone = unhealthy ? "crit" : (TONES[container.state] ?? "");
+  setData(row.tr, "state", container.state);
+  setData(row.tr, "tone", unhealthy ? "crit" : (TONES[container.state] ?? ""));
   setText(row.state, label);
 
   setText(row.name, container.name);
-  row.name.title = container.name;
+  setTitle(row.name, container.name);
   setText(row.image, shortImage(container.image));
-  row.image.title = `${container.image}  (${container.id})`;
+  setTitle(row.image, `${container.image}  (${container.id})`);
   renderPorts(row, container.ports);
 
   // Docker counts 100% per core; the bar shows the share of the whole machine instead.
@@ -137,7 +149,7 @@ function updateRow(row, container) {
   row.tx.set(container.net_tx_bps);
 
   setText(row.status, shortStatus(container.status));
-  row.status.title = container.status;
+  setTitle(row.status, container.status);
 }
 
 // --- Table -----------------------------------------------------------------
@@ -191,7 +203,7 @@ function placeRows(wanted) {
 
 export function renderContainers(data) {
   section.classList.toggle("offline", !data.ok);
-  count.dataset.tone = data.ok ? "" : "crit";
+  setData(count, "tone", data.ok ? "" : "crit");
   if (!data.ok) {
     // Keep the last known lines on screen, switched off, instead of blanking the table.
     setText(count, `!! ${data.error} -- retrying`);

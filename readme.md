@@ -5,7 +5,7 @@ No this dashboard doesn't fix anything. But clueless relatives might call you a 
 
 ![The dashboard at 1920x1080](docs/overview.png)
 
-The backend is Python (FastAPI) and reads everything from the local machine. The page is plain HTML, CSS and JavaScript with no build step. It runs on Linux, Windows and macOS. Linux is where it can read the most; [what the other two leave empty](#linux-windows-and-macos) is listed further down.
+The backend is Python (Starlette) and reads everything from the local machine. The page is plain HTML, CSS and JavaScript with no build step. It runs on Linux, Windows and macOS. Linux is where it can read the most; [what the other two leave empty](#linux-windows-and-macos) is listed further down.
 
 The screenshots here were taken with made-up containers and addresses.
 
@@ -30,7 +30,7 @@ The rest of the page is detail:
 | Listening | Open ports, what owns them, and whether they can be reached from the network or only from the machine itself |
 | Power | CPU and GPU watts, an estimate of the draw at the wall, energy today and this month, and the cost if a price is set |
 | GPU | Load and memory of each NVIDIA card with a few minutes of history, and how many programs are using it. With several cards the first two get a line each |
-| Temperature, Fans / volts | Whatever `hwmon` and `nvidia-smi` report |
+| Temperature, Fans / volts | Whatever `hwmon` and the NVIDIA driver report |
 | Hardware | Board, BIOS, CPU, memory, GPU, disks |
 | UPS / room | A USB UPS known to `upower`, and an optional room temperature sensor |
 | Containers | State, image, ports, CPU, memory and network rate for each container. There is room for nine; past that, the uneventful ones are summed up in a last line |
@@ -142,7 +142,7 @@ Start the browser in kiosk mode, for example `firefox --kiosk http://127.0.0.1:8
   - Linux: the socket has to be usable by the user that runs the dashboard, which on most systems means being in the `docker` group. Docker Engine at `/var/run/docker.sock` is tried first, then Docker Desktop.
   - Windows and macOS: Docker Desktop, running.
 - Linux only: `ss` from iproute2, which practically every distribution ships. Optional: `upower` for a UPS.
-- Optional: `nvidia-smi` for GPU readings. It comes with the NVIDIA driver.
+- Optional: the NVIDIA driver, for GPU readings. The dashboard reads the cards through the driver's own library (NVML), and falls back to `nvidia-smi` where that library cannot be loaded.
 - A current Firefox or Chromium-based browser to look at it.
 
 On Linux, pings use unprivileged ICMP sockets. Ubuntu allows these by default; elsewhere check `net.ipv4.ping_group_range`.
@@ -183,6 +183,7 @@ The same names work as environment variables, and one set that way wins over the
 | `DASH_HOST` | `127.0.0.1` | Address the server listens on |
 | `DASH_PORT` | `8787` | Port |
 | `DASH_INTERVAL` | `1` | Seconds between updates |
+| `DASH_FPS` | `30` | Frames a second for the moving parts of the page. `60` is more fluid and costs the browser about twice as much |
 | `DOCKER_HOST` | unset | Docker socket to use. Unset, it tries the places Docker Engine and Docker Desktop use on that system |
 | `DASH_IFACE` | unset | Network interface to watch. Unset, the one holding the default route |
 | `DASH_PING_TARGET` | `1.1.1.1` | Outside address to ping |
@@ -216,7 +217,7 @@ What the dashboard prints goes to `rack-dashboard.log` in the same folder. The f
 
 ## About the power figures
 
-There is no power meter involved. GPU power comes from `nvidia-smi`. CPU power is measured when the kernel's energy counter can be read and estimated from load when it cannot. Board, memory, disks and fans are a fixed allowance. The sum is then divided by the efficiency of the voltage regulators and the power supply to get a figure for the wall. Anything that is an estimate is marked with `~` on the screen.
+There is no power meter involved. GPU power comes from the NVIDIA driver. CPU power is measured when the kernel's energy counter can be read and estimated from load when it cannot. Board, memory, disks and fans are a fixed allowance. The sum is then divided by the efficiency of the voltage regulators and the power supply to get a figure for the wall. Anything that is an estimate is marked with `~` on the screen.
 
 Treat the wall figure as the right ballpark, not a measurement. If you have a metering plug, compare once and adjust `DASH_POWER_BASE_W` and `DASH_PSU_EFFICIENCY` until they agree.
 
@@ -237,7 +238,7 @@ sudo modprobe nct6775
 ## How it is put together
 
 ```
-rack_dashboard/            FastAPI app. Three collectors (containers, network, hardware) run once
+rack_dashboard/            Starlette app. Three collectors (containers, network, hardware) run once
                            a second and the result is pushed to every open page over
                            Server-Sent Events.
 rack_dashboard/frontend/   The page: ES modules, canvas for the graphs and the centrepiece,

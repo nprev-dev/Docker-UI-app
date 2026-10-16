@@ -7,9 +7,10 @@ import subprocess
 import time
 from collections import deque
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from xml.etree import ElementTree
 
+from rack_dashboard.collectors.nvml import NvmlError
 from rack_dashboard.collectors.util import run
 
 # Wall-power samples kept for the graph, and how many seconds each one covers.
@@ -516,6 +517,8 @@ class HardwareCollector:
         cpu_ticks: Callable[[], tuple[float, float]] | None = None,
         gpus: Callable[[], str] = query_gpus,
         gpu_apps: Callable[[], str] = query_gpu_apps,
+        # The driver's own library (see nvml.py), asked before nvidia-smi is started.
+        gpu_library: Any = None,
         hwmon: Callable[[], list[dict]] = scan_hwmon,
         ups: Callable[[], dict] = read_ups,
         clock: Callable[[], float] = time.time,
@@ -530,6 +533,7 @@ class HardwareCollector:
         self._cpu = cpu_power or CpuPower(idle_watts=cpu_idle_watts, max_watts=cpu_max_watts, monotonic=monotonic, ticks=cpu_ticks)
         self._query_gpus = gpus
         self._query_gpu_apps = gpu_apps
+        self._gpu_library = gpu_library
         self._scan_hwmon = hwmon
         self._read_ups = ups
         self._monotonic = monotonic
@@ -579,6 +583,12 @@ class HardwareCollector:
 
     def _gpu_readings(self) -> list[dict]:
         self._gpu_error = None
+        if self._gpu_library is not None:
+            try:
+                return self._gpu_library.readings()
+            except NvmlError:
+                # No library, or it is not answering: nvidia-smi then says why, in its own words.
+                pass
         try:
             return parse_gpus(self._query_gpus())
         except FileNotFoundError:
@@ -592,6 +602,11 @@ class HardwareCollector:
     def _gpu_programs(self) -> dict | None:
         if not self._gpus:
             return None
+        if self._gpu_library is not None:
+            try:
+                return self._gpu_library.programs()
+            except NvmlError:
+                pass
         try:
             return parse_gpu_apps(self._query_gpu_apps())
         except (OSError, subprocess.SubprocessError):

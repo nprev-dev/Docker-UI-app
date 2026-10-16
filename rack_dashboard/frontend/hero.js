@@ -5,14 +5,26 @@
 // What is drawn is always the scene's present state, which glides (see scene.js): nothing in here
 // may switch on a threshold, or the picture would jump when data arrives.
 
-import { calm, cellWidth, element, formatRate, formatRateShort, setText } from "./common.js";
+import {
+  calm,
+  cellWidth,
+  driveGlides,
+  element,
+  formatRate,
+  formatRateShort,
+  setData,
+  setText,
+  setTitle,
+} from "./common.js";
 import { settleField, tendField } from "./field.js";
 import { Scene } from "./scene.js";
 
-// Frames per second, best first. The picture starts at the top rate and steps down when one frame
-// costs more than a third of the time between frames (a browser drawing without the graphics card),
-// then back up once a frame would cost under a quarter of it.
-const RATES = [60, 30, 20];
+// Frames per second, best first. The top rate is the DASH_FPS setting, 30 unless set: 60 is more fluid
+// and costs the browser about twice as much. The picture starts at the top rate and steps down to a
+// half and a third of it when one frame costs more than a third of the time between frames (a
+// browser drawing without the graphics card), then back up once a frame would cost under a quarter of it.
+const steps = (top) => [top, top / 2, top / 3];
+let rates = steps(30);
 // A frame is drawn once this share of the wait has passed. The screen's own rhythm then sets the
 // pace, and frames come evenly spaced instead of now early, now late.
 const EARLY = 0.7;
@@ -84,8 +96,8 @@ function writeCallout(callout) {
   if (!callout.node) return;
   setText(callout.title, callout.node.label);
   setText(callout.detail, callout.node.detail);
-  callout.box.dataset.tone = callout.node.tone;
-  callout.box.title = `${callout.node.label}  ${callout.node.detail}`;
+  setData(callout.box, "tone", callout.node.tone);
+  setTitle(callout.box, `${callout.node.label}  ${callout.node.detail}`);
 }
 
 // --- Turning a snapshot into the things to show --------------------------------------
@@ -157,6 +169,11 @@ function describe(snapshot) {
 }
 
 export function renderHero(snapshot) {
+  if (snapshot.fps && snapshot.fps !== rates[0]) {
+    rates = steps(snapshot.fps);
+    pace = 0;
+    timings = [];
+  }
   setText(nameLabel, snapshot.host ?? "");
   scene.update(describe(snapshot), (snapshot.hardware?.power?.cpu_load ?? 0) / 100, performance.now());
 
@@ -172,7 +189,7 @@ export function renderHero(snapshot) {
   // Only things moving data right now can be named; among them, the one that has moved most lately.
   const busiest = live.reduce((best, node) => (node.rate > 1000 && node.busy > (best?.busy ?? 0) ? node : best), null);
   setText(readout.busiest, busiest?.label ?? "-");
-  readout.busiest.title = busiest ? `${busiest.label}  ${busiest.detail}` : "";
+  setTitle(readout.busiest, busiest ? `${busiest.label}  ${busiest.detail}` : "");
 
   // Trouble starting or ending anywhere, or a labelled thing going away, cannot wait for the next round of labels.
   const troubled = live.filter((node) => node.tone === "warn" || node.tone === "crit").map((node) => node.id + node.tone).join();
@@ -239,7 +256,9 @@ function fadeCallouts(elapsed) {
         callout.painted = opacity;
         callout.box.style.opacity = opacity;
       }
-      callout.box.hidden = !callout.node;
+      // Written only when it changes: the browser counts every write as a change to the page, and
+      // a change means laying the page out again.
+      if (callout.box.hidden !== !callout.node) callout.box.hidden = !callout.node;
     }
   }
 }
@@ -388,13 +407,71 @@ function placeLabels(g) {
   }
 }
 
+// The parts of the core that never move are drawn once into pictures of their own and copied in
+// every frame, which costs far less than drawing them again. Only a new size or new colours redraw
+// them. Each picture keeps the fraction of a pixel by which the centre is off the grid, so what is
+// copied is exactly what would have been drawn.
+let corePictures = null;
+
+function picture(g, reach, paint) {
+  const left = Math.floor(g.cx - reach);
+  const top = Math.floor(g.cy - reach);
+  const sheet = document.createElement("canvas");
+  sheet.width = Math.ceil(g.cx + reach) - left;
+  sheet.height = Math.ceil(g.cy + reach) - top;
+  const pen = sheet.getContext("2d");
+  pen.translate(-left, -top);
+  pen.globalCompositeOperation = "lighter";
+  paint(pen);
+  return { sheet, left, top };
+}
+
+function pictures(g) {
+  const key = [g.width, g.height, g.cx, g.cy, g.core, g.ratio, colours.blue.css, colours.ink.css].join();
+  if (corePictures?.key === key) return corePictures;
+  const glow = picture(g, g.core * 3, (pen) => {
+    const gradient = pen.createRadialGradient(g.cx, g.cy, g.core * 0.7, g.cx, g.cy, g.core * 2.8);
+    gradient.addColorStop(0, colours.blue.css);
+    gradient.addColorStop(1, "transparent");
+    pen.fillStyle = gradient;
+    pen.fillRect(g.cx - g.core * 3, g.cy - g.core * 3, g.core * 6, g.core * 6);
+  });
+  // Parallels, seen from slightly above.
+  const parallels = picture(g, g.core + 2 * g.ratio, (pen) => {
+    pen.strokeStyle = colours.blue.css;
+    pen.lineWidth = g.ratio;
+    pen.globalAlpha = 0.35;
+    for (const latitude of [-0.9, -0.45, 0, 0.45, 0.9]) {
+      const radius = g.core * Math.cos(latitude);
+      pen.beginPath();
+      pen.ellipse(g.cx, g.cy + g.core * Math.sin(latitude) * 0.94, radius, radius * 0.34, 0, 0, Math.PI * 2);
+      pen.stroke();
+    }
+  });
+  // The rim: three strokes of one circle, wide and faint to narrow and bright. Drawn at half strength
+  // and copied twice, because together they add up to more than one picture can hold.
+  const rim = picture(g, g.core + 4 * g.ratio, (pen) => {
+    pen.strokeStyle = colours.ink.css;
+    for (const [width, alpha] of [[5, 0.12], [2.5, 0.3], [1.2, 0.9]]) {
+      pen.globalAlpha = alpha / 2;
+      pen.lineWidth = width * g.ratio;
+      pen.beginPath();
+      pen.arc(g.cx, g.cy, g.core, 0, Math.PI * 2);
+      pen.stroke();
+    }
+  });
+  corePictures = { key, glow, parallels, rim };
+  return corePictures;
+}
+
+function copy(drawn, alpha, times = 1) {
+  context.globalAlpha = alpha;
+  for (let index = 0; index < times; index += 1) context.drawImage(drawn.sheet, drawn.left, drawn.top);
+}
+
 function drawCore(g) {
-  const glow = context.createRadialGradient(g.cx, g.cy, g.core * 0.7, g.cx, g.cy, g.core * 2.8);
-  glow.addColorStop(0, colours.blue.css);
-  glow.addColorStop(1, "transparent");
-  context.globalAlpha = 0.18 + 0.4 * scene.load;
-  context.fillStyle = glow;
-  context.fillRect(g.cx - g.core * 3, g.cy - g.core * 3, g.core * 6, g.core * 6);
+  const { glow, parallels, rim } = pictures(g);
+  copy(glow, 0.18 + 0.4 * scene.load);
 
   // The sphere itself is dark, so the lines appear to come from behind its edge.
   context.globalCompositeOperation = "source-over";
@@ -415,22 +492,8 @@ function drawCore(g) {
     context.ellipse(g.cx, g.cy, Math.max(0.5, g.core * Math.abs(Math.cos(phase))), g.core, 0, 0, Math.PI * 2);
     context.stroke();
   }
-  // Parallels, seen from slightly above.
-  for (const latitude of [-0.9, -0.45, 0, 0.45, 0.9]) {
-    const radius = g.core * Math.cos(latitude);
-    context.globalAlpha = 0.35;
-    context.beginPath();
-    context.ellipse(g.cx, g.cy + g.core * Math.sin(latitude) * 0.94, radius, radius * 0.34, 0, 0, Math.PI * 2);
-    context.stroke();
-  }
-  context.strokeStyle = colours.ink.css;
-  for (const [width, alpha] of [[5, 0.12], [2.5, 0.3], [1.2, 0.9]]) {
-    context.globalAlpha = alpha * (0.6 + 0.4 * scene.load);
-    context.lineWidth = width * g.ratio;
-    context.beginPath();
-    context.arc(g.cx, g.cy, g.core, 0, Math.PI * 2);
-    context.stroke();
-  }
+  copy(parallels, 1);
+  copy(rim, 0.6 + 0.4 * scene.load, 2);
 }
 
 function drawEndpoints(g) {
@@ -524,16 +587,20 @@ function draw(now, elapsed) {
   context.globalAlpha = 1;
 }
 
+// With less motion the numbers jump at once anyway, and this loop draws only once a second.
+const stepGlides = calm ? null : driveGlides();
+
 function frame(now) {
   requestAnimationFrame(frame);
   // Someone who asked for less motion gets one still picture a second: current, but nothing flows.
-  const wait = calm ? 1000 : 1000 / RATES[pace];
+  const wait = calm ? 1000 : 1000 / rates[pace];
   // A screen nobody can see needs no frames at all.
   if (document.hidden || now - lastDraw < wait * EARLY) return;
   // Real time since the last frame, however long: a screen that was hidden, or is slow to draw,
   // catches up with the data at once instead of running behind it.
   const elapsed = now - lastDraw;
   lastDraw = now;
+  stepGlides?.(Math.min(elapsed, 1000));
   if (now - lastTimed < TIMED_FRAME_MS) {
     draw(now, elapsed);
     return;
@@ -551,14 +618,14 @@ function frame(now) {
   frameCost = [...timings].sort((a, b) => a - b)[Math.floor((timings.length - 1) / 2)];
   if (timings.length < 3) {
     // Too early to judge.
-  } else if (pace < RATES.length - 1 && frameCost > 1000 / RATES[pace] / 3) {
+  } else if (pace < rates.length - 1 && frameCost > 1000 / rates[pace] / 3) {
     pace += 1;
-  } else if (pace > 0 && frameCost < 1000 / RATES[pace - 1] / 4) {
+  } else if (pace > 0 && frameCost < 1000 / rates[pace - 1] / 4) {
     pace -= 1;
   }
   // Kept on the element, where they are easy to inspect.
-  canvas.dataset.frameMs = frameCost.toFixed(1);
-  canvas.dataset.fps = String(RATES[pace]);
+  setData(canvas, "frameMs", frameCost.toFixed(1));
+  setData(canvas, "fps", String(rates[pace]));
 }
 
 addEventListener("resize", () => {

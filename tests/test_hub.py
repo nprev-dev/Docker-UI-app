@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from rack_dashboard.app import Hub
+from rack_dashboard.app import Hub, frame_rate
 
 
 def test_new_viewer_gets_the_latest_snapshot_at_once():
@@ -53,3 +53,11 @@ def test_hub_survives_a_viewer_that_gave_up():
         return await asyncio.wait_for(hub.newer_than(0), timeout=1)
 
     assert asyncio.run(scenario()) == (1, {"n": 1})
+
+
+def test_frame_rate_setting():
+    assert frame_rate(None) == 30 and frame_rate("") == 30
+    assert frame_rate("60") == 60 and frame_rate(" 45 ") == 45
+    # Out of range is brought into range; something that is not a whole number is ignored.
+    assert frame_rate("144") == 120 and frame_rate("1") == 10 and frame_rate("0") == 10
+    assert frame_rate("sixty") == 30 and frame_rate("29.97") == 30

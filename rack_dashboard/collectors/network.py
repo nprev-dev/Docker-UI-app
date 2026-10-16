@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import ipaddress
 import math
 import re
@@ -157,8 +158,9 @@ _RECEIVED = re.compile(r"\bbytes_received:(\d+)")
 
 def _endpoint(text: str) -> tuple[str, int | None]:
     address, _, port = text.rpartition(":")
-    # "[fe80::1%eth0]" and "127.0.0.53%lo" carry brackets and an interface name we do not need.
-    address = address.strip("[]").split("%")[0]
+    # "[fe80::1]%eth0", "[fe80::1%eth0]" and "127.0.0.53%lo" carry brackets and an interface name
+    # we do not need.
+    address = address.split("%")[0].strip("[]")
     # A dual-stack socket reports IPv4 peers as "::ffff:1.2.3.4".
     if address.startswith("::ffff:") and "." in address:
         address = address[7:]
@@ -222,7 +224,9 @@ SERVICE_ALIASES = {"domain": "dns", "ms-wbt-server": "rdp", "ipp": "cups"}
 SERVICE_FALLBACK = {(22, "tcp"): "ssh", (53, "tcp"): "dns", (53, "udp"): "dns", (5353, "udp"): "mdns", (3389, "tcp"): "rdp", (3389, "udp"): "rdp"}
 
 
+@functools.lru_cache(maxsize=1024)
 def _service(port: int, proto: str) -> str | None:
+    # Asked for every listening port every second; the answer only changes with /etc/services.
     try:
         name = socket.getservbyport(port, proto)
     except (OSError, OverflowError):

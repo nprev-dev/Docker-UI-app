@@ -11,6 +11,7 @@ import pytest
 
 from rack_dashboard.collectors import hardware as mod
 from rack_dashboard.collectors.hardware import CpuPower, EnergyMeter, HardwareCollector
+from rack_dashboard.collectors.nvml import NvmlError
 from rack_dashboard.state import StateFile
 
 GIB = 1024**3
@@ -984,3 +985,45 @@ def test_inventory_that_takes_a_while_is_asked_for_again(rig):
         rig.tick()
         collector.collect()
     assert len(asked) == 3
+
+
+class FailingLibrary:
+    def readings(self):
+        raise NvmlError("library not available")
+
+    def programs(self):
+        raise NvmlError("library not available")
+
+
+class Library:
+    def __init__(self):
+        self.calls = 0
+
+    def readings(self):
+        self.calls += 1
+        return [{"name": "Library card", "mem_total": 8 * 1024**3, "mem_used": 1024**3, "load": 50.0, "temp": 40.0, "fan": 20.0, "watts": 60.0, "limit_watts": 115.0}]
+
+    def programs(self):
+        return {"count": 2, "mem": 3 * MIB}
+
+
+def test_the_driver_library_is_asked_before_nvidia_smi(rig):
+    library = Library()
+    gpu = rig.build(gpu_library=library).collect()["gpu"]
+
+    assert [card["name"] for card in gpu["cards"]] == ["Library card"] and gpu["apps"] == {"count": 2, "mem": 3 * MIB}
+    assert rig.calls["gpus"] == 0 and rig.calls["apps"] == 0
+
+
+def test_without_the_library_nvidia_smi_answers_as_before(rig):
+    gpu = rig.build(gpu_library=FailingLibrary()).collect()["gpu"]
+
+    assert gpu["cards"] and rig.calls["gpus"] == 1 and rig.calls["apps"] == 1
+
+
+def test_a_broken_driver_is_still_explained_by_nvidia_smi(rig):
+    rig.gpu_error = subprocess.CalledProcessError(9, "nvidia-smi", output="NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.")
+
+    gpu = rig.build(gpu_library=FailingLibrary()).collect()["gpu"]
+
+    assert gpu["cards"] == [] and gpu["error"].startswith("NVIDIA-SMI has failed")

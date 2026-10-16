@@ -21,7 +21,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
 ]
 dependencies = [
-    "fastapi>=0.115",
+    "starlette>=0.40",
     "uvicorn>=0.30",
     "docker>=7.1",
     # Linux is read straight from the kernel's own files; other systems are asked through psutil.
